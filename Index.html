@@ -1,0 +1,2387 @@
+<!-- ============================================================================================
+     PARIS FASHION — DEAD STOCK TRACKER  (ERP admin panel, served by Code.gs doGet())
+     React 18 + Babel (in-browser) · Chart.js 4.4.0 · SweetAlert2 11 · Font Awesome 6.5.1
+     NO jQuery / NO DataTables — native React tables. Sidebar shell · login + roles · KPI dashboard.
+     navy theme · CSS variables · ₹ Indian format · mobile-first · error boundary (never blanks).
+     Bilingual UI (English / Hinglish) via a top-bar language toggle — see LangCtx / useLang() / L().
+     ============================================================================================ -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paris Fashion — Dead Stock Tracker</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/sweetalert2/11.10.1/sweetalert2.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sweetalert2/11.10.1/sweetalert2.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+  :root {
+    --navy-900:#0b1e3f; --navy-800:#12294f; --navy-700:#1b3a6b; --navy-600:#2a4d86;
+    --navy-500:#3a63a8; --accent:#4f8cff; --bg:#eef1f7; --card:#ffffff;
+    --text:#1a2438; --muted:#6b7890; --border:#e2e7f0;
+    --dead:#c62828; --dead-bg:#fdecec; --negative:#b26a00; --negative-bg:#fff4e2;
+    --stale:#ef6c00; --stale-bg:#fff3e6; --slow:#f9a825; --slow-bg:#fff9e6;
+    --selling:#2e7d32; --selling-bg:#e9f6ea; --cleared:#607d8b; --cleared-bg:#eceff1;
+    --returncand:#6a1b9a; --returncand-bg:#f3e5f5; --ok:#2e7d32; --ok-bg:#e9f6ea;
+    --shadow:0 1px 3px rgba(11,30,63,.10),0 1px 2px rgba(11,30,63,.06);
+    --sidebar-w:242px;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; }
+
+  /* ---------- language toggle ---------- */
+  .lang-toggle { display:flex; border:1px solid var(--border); border-radius:999px; overflow:hidden; flex-shrink:0; }
+  .lang-toggle button { border:none; background:#fff; color:var(--muted); font-size:11.5px; font-weight:700;
+                         padding:7px 12px; cursor:pointer; white-space:nowrap; }
+  .lang-toggle button.active { background:var(--navy-700); color:#fff; }
+  .login-card .lang-toggle { margin:0 0 18px; width:100%; }
+  .login-card .lang-toggle button { flex:1; padding:9px 8px; }
+
+  /* ---------- login ---------- */
+  .login-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center;
+                background:radial-gradient(1200px 600px at 20% -10%, var(--navy-600), var(--navy-900)); padding:20px; }
+  .login-card { background:#fff; border-radius:16px; padding:34px 30px; width:100%; max-width:380px;
+                box-shadow:0 24px 70px rgba(0,0,0,.35); }
+  .login-card .logo { width:46px; height:46px; border-radius:12px; background:linear-gradient(135deg,var(--navy-700),var(--accent));
+                      display:flex; align-items:center; justify-content:center; color:#fff; font-size:20px; margin-bottom:16px; }
+  .login-card h1 { font-size:19px; margin:0 0 4px; color:var(--navy-800); }
+  .login-card p.tag { color:var(--muted); font-size:13px; margin:0 0 22px; }
+  .login-card label { font-size:12px; color:var(--muted); display:block; margin-bottom:5px; font-weight:600; }
+  .login-card input { width:100%; padding:11px 12px; border:1px solid var(--border); border-radius:9px; font-size:14px; margin-bottom:14px; }
+  .login-card button[type=submit] { width:100%; background:var(--navy-700); color:#fff; border:none; padding:12px; border-radius:9px;
+                       font-size:15px; font-weight:600; cursor:pointer; }
+  .login-card button:disabled { opacity:.6; cursor:default; }
+
+  /* ---------- shell ---------- */
+  .shell { display:flex; min-height:100vh; }
+  .sidebar { width:var(--sidebar-w); background:linear-gradient(180deg,var(--navy-900),#0a1830);
+             color:#fff; position:fixed; inset:0 auto 0 0; z-index:60; display:flex; flex-direction:column;
+             transition:transform .25s ease; }
+  .sidebar .brand { padding:20px 18px; font-size:15px; font-weight:700; display:flex; align-items:center; gap:11px;
+                    border-bottom:1px solid rgba(255,255,255,.08); }
+  .sidebar .brand .logo { width:30px; height:30px; border-radius:9px; background:linear-gradient(135deg,var(--navy-600),var(--accent));
+                          display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .sidebar nav { padding:12px 10px; flex:1; overflow-y:auto; }
+  .sidebar nav button { width:100%; text-align:left; background:transparent; border:none; color:rgba(255,255,255,.72);
+                        padding:11px 13px; border-radius:9px; font-size:13.5px; cursor:pointer; display:flex; align-items:center;
+                        gap:12px; margin-bottom:2px; }
+  .sidebar nav button:hover { background:rgba(255,255,255,.08); color:#fff; }
+  .sidebar nav button.active { background:var(--accent); color:#fff; font-weight:600; }
+  .sidebar nav button i { width:18px; text-align:center; font-size:14px; }
+  .sidebar .foot { padding:13px 18px; font-size:11px; color:rgba(255,255,255,.4); border-top:1px solid rgba(255,255,255,.08); }
+
+  .main { margin-left:var(--sidebar-w); flex:1; min-width:0; display:flex; flex-direction:column; }
+  .topbar { background:#fff; border-bottom:1px solid var(--border); padding:11px 20px; display:flex; align-items:center;
+            gap:12px; position:sticky; top:0; z-index:40; flex-wrap:wrap; }
+  .topbar .hamburger { display:none; background:none; border:none; font-size:18px; color:var(--navy-800); cursor:pointer; }
+  .topbar h2 { font-size:16px; margin:0; flex:1; }
+  .topbar select, .topbar .icon-btn { background:#fff; border:1px solid var(--border); border-radius:8px; padding:8px 10px;
+                                      font-size:13px; cursor:pointer; }
+  .topbar .userchip { text-align:right; font-size:12.5px; line-height:1.25; }
+  .topbar .userchip .role { color:var(--muted); text-transform:uppercase; font-size:10px; letter-spacing:.6px; }
+  .topbar .logout { background:var(--dead-bg); color:var(--dead); border:none; border-radius:8px; padding:8px 12px;
+                    font-size:13px; cursor:pointer; font-weight:600; }
+  .content { padding:20px; width:100%; max-width:1240px; }
+
+  .backdrop { display:none; }
+
+  /* ---------- KPI cards ---------- */
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin-bottom:18px; }
+  .kpi { background:var(--card); border-radius:14px; padding:16px; box-shadow:var(--shadow); border-left:4px solid var(--navy-500); }
+  .kpi .label { font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .kpi .value { font-size:23px; font-weight:700; margin-top:6px; }
+  .kpi .sub { font-size:11px; color:var(--muted); margin-top:3px; }
+  .kpi.dead { border-left-color:var(--dead); } .kpi.dead .value { color:var(--dead); }
+  .kpi.amber { border-left-color:var(--negative); } .kpi.amber .value { color:var(--negative); }
+  .kpi.good { border-left-color:var(--selling); } .kpi.good .value { color:var(--selling); }
+
+  .alert { background:#fff8e1; border:1px solid #ffe082; border-radius:12px; padding:12px 14px; margin-bottom:16px;
+           display:flex; align-items:center; gap:10px; color:#8a6d00; font-weight:600; flex-wrap:wrap; }
+  .alert button { margin-left:auto; background:var(--navy-700); color:#fff; border:none; padding:7px 12px; border-radius:8px; cursor:pointer; }
+  .alert.err { background:#fdecec; border-color:#f5c2c2; color:var(--dead); }
+
+  .panel { background:var(--card); border-radius:14px; padding:16px; box-shadow:var(--shadow); margin-bottom:16px; }
+  .panel h2 { font-size:15px; margin:0 0 12px; }
+  .panel h2 small { font-weight:400; color:var(--muted); font-size:12px; }
+
+  .chart-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .chart-box { position:relative; height:300px; }
+
+  .filters { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .filters label { font-size:11px; color:var(--muted); display:block; margin-bottom:3px; text-transform:uppercase; letter-spacing:.3px; }
+  .filters select, .filters input { padding:8px 10px; border:1px solid var(--border); border-radius:8px; font-size:13px; background:#fff; min-width:130px; }
+
+  /* ---------- multi-select dropdown (checkbox panel) ---------- */
+  .msel { position:relative; min-width:150px; }
+  .msel-btn { width:100%; text-align:left; padding:8px 10px; border:1px solid var(--border); border-radius:8px; font-size:13px;
+              background:#fff; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:6px; }
+  .msel-btn span.txt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .msel-panel { position:fixed; z-index:1000; background:#fff; border:1px solid var(--border);
+                border-radius:10px; box-shadow:0 8px 24px rgba(11,30,63,.18); width:max-content; min-width:200px; max-width:320px;
+                max-height:260px; overflow-y:auto; padding:8px; }
+  .msel-panel .msel-search { width:100%; padding:6px 8px; margin-bottom:6px; border:1px solid var(--border); border-radius:6px; font-size:12.5px; box-sizing:border-box; }
+  .msel-panel .msel-actions { display:flex; gap:8px; margin-bottom:6px; padding-bottom:6px; border-bottom:1px solid var(--border); }
+  .msel-panel .msel-actions button { background:none; border:none; color:var(--accent); font-size:11.5px; font-weight:700; cursor:pointer; padding:2px 0; }
+  .msel-panel label { display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text); padding:5px 6px;
+                       cursor:pointer; text-transform:none; white-space:nowrap; border-radius:6px; }
+  .msel-panel label:hover { background:#f2f5fb; }
+  .msel-panel input[type=checkbox] { flex-shrink:0; width:15px; height:15px; margin:0; accent-color:var(--navy-700); cursor:pointer; }
+
+  /* ---------- per-column header filter (Excel-style, inside table.ntable th) ---------- */
+  .colf { position:relative; display:inline-block; margin-left:6px; }
+  .colf-btn { background:none; border:none; color:rgba(255,255,255,.55); cursor:pointer; font-size:11px; padding:2px 3px; line-height:1; }
+  .colf-btn:hover { color:#fff; }
+  .colf-btn.active { color:#ffd54f; }
+  .colf-panel { color:var(--text); font-weight:400; }
+
+  .tbl-toolbar { display:flex; align-items:center; gap:12px; margin-bottom:8px; flex-wrap:wrap; }
+  .tbl-toolbar .search { display:flex; align-items:center; gap:6px; border:1px solid var(--border); border-radius:8px; padding:6px 10px; background:#fff; flex:1 1 200px; }
+  .tbl-toolbar .search input { border:none; outline:none; font-size:13px; width:100%; }
+  .tbl-toolbar select { padding:8px 10px; border:1px solid var(--border); border-radius:8px; font-size:12.5px; background:#fff; cursor:pointer; }
+  .tbl-toolbar .count { font-size:12px; color:var(--muted); }
+  .toggle-inline { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); cursor:pointer; user-select:none; }
+  .tbl-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  @media (min-width:641px) {
+    .tbl-scroll { max-height:70vh; overflow-y:auto; }
+    table.ntable thead th { position:sticky; top:0; z-index:5; }
+  }
+  table.ntable { width:100%; border-collapse:collapse; font-size:13px; }
+  table.ntable thead th { background:var(--navy-800); color:#fff; padding:9px 8px; font-weight:600; text-align:left; white-space:nowrap; position:relative; }
+  table.ntable thead th.sortable { cursor:pointer; }
+  table.ntable thead th.num, table.ntable tbody td.num { text-align:right; }
+  table.ntable tbody td { padding:8px; border-bottom:1px solid var(--border); }
+  table.ntable tbody tr.row-dead td { background:var(--dead-bg); color:var(--dead); font-weight:600; }
+  table.ntable tbody tr.row-negative td { background:var(--negative-bg); }
+  table.ntable tbody tr.row-behind td { background:var(--returncand-bg); }
+  table.ntable td.empty { text-align:center; color:var(--muted); padding:24px; }
+  .num { font-variant-numeric:tabular-nums; }
+
+  .pager { display:flex; align-items:center; justify-content:center; gap:12px; margin-top:12px; font-size:13px; color:var(--muted); }
+  .pager button { border:1px solid var(--border); background:#fff; border-radius:8px; padding:6px 12px; cursor:pointer; }
+  .pager button:disabled { opacity:.4; cursor:default; }
+
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:700; }
+  .pill.DEAD{background:var(--dead-bg);color:var(--dead);}
+  .pill.NEGATIVE{background:var(--negative-bg);color:var(--negative);}
+  .pill.STALE{background:var(--stale-bg);color:var(--stale);}
+  .pill.SLOW{background:var(--slow-bg);color:var(--slow);}
+  .pill.SELLING{background:var(--selling-bg);color:var(--selling);}
+  .pill.CLEARED{background:var(--cleared-bg);color:var(--cleared);}
+  .pill.UNKNOWN{background:#eee;color:#666;}
+  .pill.RETURNCAND{background:var(--returncand-bg);color:var(--returncand);}
+  .pill.OK{background:var(--ok-bg);color:var(--ok);}
+
+  .sm-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px; }
+  .sm-card { border:1px solid var(--border); border-radius:12px; padding:12px; }
+  .sm-card h3 { margin:0 0 4px; font-size:14px; }
+  .sm-card .meta { font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .sm-card .sm-sub { font-size:10.5px; color:var(--muted); margin:6px 0 4px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
+  .sm-card table { width:100%; border-collapse:collapse; font-size:12px; }
+  .sm-card td { padding:4px 6px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .sm-card .danger { color:var(--dead); font-weight:700; }
+  .sm-card tr.clickable-row:hover td { background:#eef3fb; }
+
+  .kpi.clickable { cursor:pointer; transition:transform .15s ease, box-shadow .15s ease; }
+  .kpi.clickable:hover { transform:translateY(-2px); box-shadow:0 6px 18px rgba(11,30,63,.16); }
+  .kpi.clickable:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  table.ntable tbody tr.clickable-row { cursor:pointer; }
+  table.ntable tbody tr.clickable-row:hover td { background:#eef3fb; }
+  .item-detail-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:12px; }
+  .item-detail-grid .box { background:#f6f8fc; border-radius:9px; padding:8px 10px; }
+  .item-detail-grid .box b { display:block; font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.3px; margin-bottom:3px; }
+  .item-detail-grid .box span { font-size:16px; font-weight:700; color:var(--navy-800); }
+
+  .legend-row { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; font-size:12px; color:var(--muted); }
+  .legend-item { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+
+  /* ---------- loader (replaces the old plain spinner) ---------- */
+  .loader { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:70px 20px; gap:18px; }
+  .loader-rings { position:relative; width:66px; height:66px; }
+  .loader-rings span { position:absolute; border-radius:50%; border:4px solid transparent; }
+  .loader-rings span:nth-child(1) { inset:0; border-top-color:var(--accent); border-right-color:var(--accent); animation:pf-spin 1s linear infinite; }
+  .loader-rings span:nth-child(2) { inset:11px; border-bottom-color:var(--navy-600); border-left-color:var(--navy-600); animation:pf-spin 1.3s linear infinite reverse; }
+  .loader-rings i { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:17px; color:var(--navy-700); animation:pf-pulse 1.6s ease-in-out infinite; }
+  @keyframes pf-spin { to { transform:rotate(360deg); } }
+  @keyframes pf-pulse { 0%,100% { opacity:.45; transform:scale(.88); } 50% { opacity:1; transform:scale(1.08); } }
+  .loader p { color:var(--muted); font-size:13px; font-weight:600; text-align:center; margin:0; line-height:1.5; }
+
+  /* ---------- Not Selling: day picker ---------- */
+  .days-picker { background:#f6f8fc; border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:14px; }
+  .days-picker > label { font-size:12px; color:var(--muted); font-weight:600; display:block; margin-bottom:8px; }
+  .days-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .days-row input[type=number] { width:88px; padding:9px 10px; border:1px solid var(--border); border-radius:8px; font-size:16px; font-weight:700; text-align:center; }
+  .days-row .unit { font-size:12.5px; color:var(--muted); }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .chip { border:1px solid var(--border); background:#fff; border-radius:999px; padding:6px 13px; font-size:12.5px; cursor:pointer; font-weight:600; color:var(--navy-700); }
+  .chip.active { background:var(--navy-700); color:#fff; border-color:var(--navy-700); }
+
+  .import-box textarea { width:100%; min-height:240px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; resize:vertical; padding:10px; border:1px solid var(--border); border-radius:9px; }
+  .import-box .row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px; }
+  .btn-primary { background:var(--navy-700); color:#fff; border:none; padding:11px 20px; border-radius:9px; font-size:14px; font-weight:600; cursor:pointer; }
+  .btn-primary:disabled { opacity:.55; cursor:default; }
+  .btn-sm { background:#fff; color:var(--navy-700); border:1px solid var(--border); border-radius:8px; padding:6px 12px;
+            font-size:12.5px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+  .btn-sm:hover { background:#f2f5fb; }
+  .btn-danger-sm { background:var(--dead-bg); color:var(--dead); border:none; border-radius:8px; padding:6px 12px;
+                   font-size:12.5px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
+  .btn-danger-sm:hover { filter:brightness(.95); }
+  .hint { font-size:12px; color:var(--muted); margin-top:8px; line-height:1.6; }
+
+  .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin-bottom:16px; }
+  .form-grid label { font-size:12px; color:var(--muted); font-weight:600; display:block; margin-bottom:5px; }
+  .form-grid input { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:9px; font-size:14px; }
+  .form-grid .fhint { font-size:11px; color:var(--muted); margin-top:4px; }
+
+  footer { text-align:center; color:var(--muted); font-size:11px; padding:16px; }
+
+  @media (max-width:900px) {
+    .sidebar { transform:translateX(-100%); }
+    .sidebar.open { transform:translateX(0); }
+    .main { margin-left:0; }
+    .topbar .hamburger { display:block; }
+    .topbar .userchip { display:none; }
+    .backdrop.show { display:block; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:55; }
+    .chart-grid { grid-template-columns:1fr; }
+  }
+  @media (max-width:640px) {
+    .content { padding:12px; }
+    .kpi .value { font-size:20px; }
+    table.ntable thead { display:none; }
+    table.ntable, table.ntable tbody, table.ntable tr, table.ntable td { display:block; width:100%; }
+    table.ntable tbody tr { border:1px solid var(--border); border-radius:10px; margin-bottom:10px; padding:6px; }
+    table.ntable tbody td { border:none; display:flex; justify-content:space-between; gap:10px; padding:5px 6px; text-align:right; }
+    table.ntable tbody td::before { content:attr(data-label); font-weight:600; color:var(--muted); text-align:left; }
+  }
+</style>
+</head>
+<body>
+<div id="root">
+  <div class="loader">
+    <div class="loader-rings"><span></span><span></span><i class="fa-solid fa-shirt"></i></div>
+    <p>Loading… / Load ho raha hai…</p>
+  </div>
+</div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useLayoutEffect, useRef, useMemo, useContext } = React;
+
+/* ================= helpers ================= */
+
+function inr(n) {
+  n = Number(n) || 0;
+  const neg = n < 0;
+  let s = Math.round(Math.abs(n)).toString();
+  let last3 = s.slice(-3), rest = s.slice(0, -3);
+  if (rest) { rest = rest.replace(/\B(?=(\d{2})+(?!\d))/g, ','); last3 = ',' + last3; }
+  return (neg ? '-₹' : '₹') + rest + last3;
+}
+function num(n) { return (Number(n) || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }); }
+
+/* ---- date display: backend/storage stays ISO (YYYY-MM-DD) everywhere; only the screen shows
+   it as DD-Mon-YYYY (e.g. 10-Sep-2026). Never feed fmtDate()'s output back to the server. ---- */
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtDate(iso) {
+  if (!iso) return '';
+  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return String(iso);
+  const mon = MONTH_ABBR[parseInt(m[2], 10) - 1] || m[2];
+  return m[3] + '-' + mon + '-' + m[1];
+}
+/** "2026-09-10 14:32" -> "10-Sep-2026 14:32" */
+function fmtDateTime(stamp) {
+  if (!stamp) return '';
+  const parts = String(stamp).split(' ');
+  return fmtDate(parts[0]) + (parts[1] ? ' ' + parts[1] : '');
+}
+/** Reformat any YYYY-MM-DD substrings inside a longer server message/sentence. */
+function fmtDatesInStr(s) { return String(s || '').replace(/\d{4}-\d{2}-\d{2}/g, m => fmtDate(m)); }
+
+// promisified google.script.run with a client-side timeout so a big paste never hangs silently
+function callServer(fn, args = [], timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    if (!window.google || !google.script || !google.script.run) {
+      reject(new Error('Open this page from the deployed Web-app URL (Deploy → Web app), not a file preview.'));
+      return;
+    }
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error('The server is taking too long. For a very large Stock paste, split it into ~8,000-row chunks and try again.'));
+    }, timeoutMs);
+    google.script.run
+      .withSuccessHandler(v => { if (done) return; done = true; clearTimeout(timer); resolve(v); })
+      .withFailureHandler(e => { if (done) return; done = true; clearTimeout(timer); reject(e); })
+      [fn](...args);
+  });
+}
+
+/* ---- auth (token kept in a module global + localStorage) ---- */
+const AUTH_KEY = 'pf_auth_v1';
+let AUTH_TOKEN = null;
+function readAuth() { try { return JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch (e) { return null; } }
+function writeAuth(a) {
+  AUTH_TOKEN = a ? a.token : null;
+  try { a ? localStorage.setItem(AUTH_KEY, JSON.stringify(a)) : localStorage.removeItem(AUTH_KEY); } catch (e) {}
+}
+const _initAuth = readAuth();
+AUTH_TOKEN = _initAuth ? _initAuth.token : null;
+
+// every authenticated call appends the token as the LAST argument
+function authed(fn, args = [], timeoutMs = 120000) { return callServer(fn, [...args, AUTH_TOKEN], timeoutMs); }
+
+/* ================= language (English / Hinglish toggle) ================= */
+
+const LANG_KEY = 'pf_lang_v1';
+const LangCtx = React.createContext(['hi', () => {}]);
+
+function LangProvider({ children }) {
+  const [lang, setLang] = useState(() => { try { return localStorage.getItem(LANG_KEY) || 'hi'; } catch (e) { return 'hi'; } });
+  useEffect(() => { try { localStorage.setItem(LANG_KEY, lang); } catch (e) {} }, [lang]);
+  return <LangCtx.Provider value={[lang, setLang]}>{children}</LangCtx.Provider>;
+}
+
+/** useLang().L(englishText, hinglishText) picks the right one for the current toggle state. */
+function useLang() {
+  const [lang, setLang] = useContext(LangCtx);
+  return { lang, setLang, L: (en, hi) => (lang === 'hi' ? (hi != null ? hi : en) : en) };
+}
+
+function LangToggle() {
+  const { lang, setLang } = useLang();
+  return (
+    <div className="lang-toggle" role="group" aria-label="Language / Bhasha">
+      <button type="button" className={lang === 'en' ? 'active' : ''} onClick={() => setLang('en')}>EN</button>
+      <button type="button" className={lang === 'hi' ? 'active' : ''} onClick={() => setLang('hi')}>Hinglish</button>
+    </div>
+  );
+}
+
+/** New loading animation — a two-ring spinner with a pulsing brand icon. */
+function Loader({ en, hi }) {
+  const { L } = useLang();
+  return (
+    <div className="loader">
+      <div className="loader-rings"><span></span><span></span><i className="fa-solid fa-shirt"></i></div>
+      <p>{L(en || 'Loading…', hi || 'Load ho raha hai…')}</p>
+    </div>
+  );
+}
+
+/* ================= item drill-down (click any item row to see full history) ================= */
+
+function itemDetailHtml(res, L) {
+  const it = res.item;
+  const rows = res.txns.map(t => (
+    '<tr>' +
+      '<td style="padding:6px 8px">' + fmtDate(t.date) + '</td>' +
+      '<td style="padding:6px 8px"><span class="pill ' +
+        (t.type === 'PURCHASE' ? 'SELLING' : t.type === 'SALE' ? 'STALE' : 'UNKNOWN') + '">' +
+        L(t.type.replace('_', ' '), t.type === 'PURCHASE' ? 'Kharid' : t.type === 'SALE' ? 'Bikri' :
+          t.type === 'PURCHASE_RETURN' ? 'Purchase Return' : 'Sale Return') + '</span></td>' +
+      '<td style="padding:6px 8px;text-align:right">' + num(t.qty) + '</td>' +
+      '<td style="padding:6px 8px;text-align:right">' + inr(t.amount) + '</td>' +
+      '<td style="padding:6px 8px">' + (t.party || t.salesman || '—') + (t.vch_no ? ' <span style="color:#93a0b8">#' + t.vch_no + '</span>' : '') + '</td>' +
+    '</tr>'
+  )).join('');
+
+  return (
+    '<div style="text-align:left;font-size:13px">' +
+      '<div class="item-detail-grid">' +
+        '<div class="box"><b>' + L('Opening', 'Opening') + '</b><span>' + num(it.opening_stock) + '</span></div>' +
+        '<div class="box"><b>' + L('Purchased — kitna aaya', 'Kitna Aaya') + '</b><span>' + num(it.net_purchased) + '</span></div>' +
+        '<div class="box"><b>' + L('Sold — kitna bika', 'Kitna Bika') + '</b><span>' + num(it.net_sold) + '</span></div>' +
+        '<div class="box"><b>' + L('Purchase return', 'Purchase Return') + '</b><span>' + num(it.pur_return) + '</span></div>' +
+        '<div class="box"><b>' + L('Sale return', 'Sale Return') + '</b><span>' + num(it.sale_return) + '</span></div>' +
+        '<div class="box" style="background:#fdecec"><b>' + L('Current — kitna bacha', 'Kitna Bacha') + '</b><span style="color:#c62828">' + num(it.current_stock) + '</span></div>' +
+      '</div>' +
+      '<div style="margin-bottom:10px;line-height:1.7">' +
+        '<b>' + L('Last purchase', 'Aakhri Kharid') + ':</b> ' + (fmtDate(it.last_purchase_date) || '—') +
+          (it.days_since_purchase != null ? ' (' + it.days_since_purchase + ' ' + L('days ago', 'din pehle') + ')' : '') + '<br>' +
+        '<b>' + L('Last sale', 'Aakhri Bikri') + ':</b> ' + (fmtDate(it.last_sale_date) || '—') +
+          (it.days_since_sale != null ? ' (' + it.days_since_sale + ' ' + L('days ago', 'din pehle') + ')' : '') + '<br>' +
+        '<b>' + L('Price', 'Price') + ':</b> ' + inr(it.price) + ' · <b>' + L('Stuck value', 'Atki Hui Value') + ':</b> ' + inr(it.stuck_value) +
+      '</div>' +
+      (res.olderHistoryExists
+        ? '<div style="background:#fff8e1;padding:8px 10px;border-radius:8px;margin-bottom:10px;font-size:12px;color:#8a6d00">' +
+          L('Some older transactions are outside the ' + res.retentionDays + '-day detail window below — the totals above already include them.',
+            'Kuch purani transactions ' + res.retentionDays + '-din ke detail window (neeche) se bahar hain — upar ke totals mein wo already shaamil hain.') +
+          '</div>'
+        : '') +
+      '<div style="max-height:280px;overflow:auto;border:1px solid #e2e7f0;border-radius:9px">' +
+        '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+          '<thead style="position:sticky;top:0"><tr style="background:#12294f;color:#fff">' +
+            '<th style="padding:6px 8px;text-align:left">' + L('Date', 'Date') + '</th>' +
+            '<th style="padding:6px 8px;text-align:left">' + L('Type', 'Type') + '</th>' +
+            '<th style="padding:6px 8px;text-align:right">' + L('Qty', 'Qty') + '</th>' +
+            '<th style="padding:6px 8px;text-align:right">' + L('Amount', 'Amount') + '</th>' +
+            '<th style="padding:6px 8px;text-align:left">' + L('Party / Salesman', 'Party / Salesman') + '</th>' +
+          '</tr></thead>' +
+          '<tbody>' + (rows || (
+            '<tr><td colspan="5" style="padding:16px;text-align:center;color:#93a0b8">' +
+            L('No transactions in the detail window.', 'Detail window mein koi transaction nahi hai.') + '</td></tr>'
+          )) + '</tbody>' +
+        '</table>' +
+      '</div>' +
+    '</div>'
+  );
+}
+
+/** Click-to-drill-down: fetch an item's full history and show it in a modal. */
+function showItemDetail(itemKey, fallbackDetails, L) {
+  if (!itemKey) return;
+  // Row clicks happen by accident sometimes — the loading popup must be closable immediately
+  // (click outside / Esc / Cancel button), and once closed the eventual server response must be
+  // ignored so it doesn't pop the detail modal back up after the user has already moved on.
+  let cancelled = false;
+  Swal.fire({
+    title: L('Loading item…', 'Item Load Ho Raha Hai…'),
+    html: '<div style="font-size:12px;color:var(--muted);margin-top:4px">' +
+          L('Click outside, press Esc, or Cancel to close this.', 'Bahar click karo, Esc dabao, ya Cancel se band karo.') + '</div>',
+    allowOutsideClick: true,
+    allowEscapeKey: true,
+    showCancelButton: true,
+    cancelButtonText: L('Cancel', 'Cancel'),
+    showConfirmButton: false,
+    didOpen: () => Swal.showLoading(),
+    willClose: () => { cancelled = true; },
+  });
+  authed('getItemHistory', [itemKey], 60000)
+    .then(res => {
+      if (cancelled) return;
+      if (res && res.authError) { Swal.close(); return; }
+      if (!res || !res.ok) {
+        Swal.fire({ icon: 'error', title: L('Could not load item', 'Item Load Nahi Hua'), text: (res && res.message) || fallbackDetails || '' });
+        return;
+      }
+      Swal.fire({
+        title: res.item.details + (res.item.group ? ' · ' + res.item.group : ''),
+        html: itemDetailHtml(res, L),
+        width: 640,
+        confirmButtonText: L('Close', 'Band Karo'),
+      });
+    })
+    .catch(e => { if (!cancelled) Swal.fire({ icon: 'error', title: L('Could not load item', 'Item Load Nahi Hua'), text: e.message || String(e) }); });
+}
+
+const STATUS_LIST = ['DEAD', 'NEGATIVE', 'STALE', 'SLOW', 'SELLING', 'CLEARED'];
+const QUICK_DAYS = [7, 10, 15, 20, 30, 45, 60, 90];
+
+// `perm` is the RBAC gate for a staff account — admin always sees every item regardless of it.
+// A staff user only sees NAV items whose `perm` (if any) is in their granted permissions.
+const NAV = [
+  { id: 'dashboard',  en: 'Dashboard',                  hi: 'Dashboard',                 icon: 'fa-gauge-high',          roles: ['admin', 'staff'], perm: 'view_dashboard' },
+  { id: 'fullreport', en: 'Full Report',                 hi: 'Poori Report',              icon: 'fa-table-list',          roles: ['admin', 'staff'], perm: 'view_report' },
+  { id: 'cancelled',  en: 'Cancelled Bills',             hi: 'Cancel Bills',              icon: 'fa-ban',                 roles: ['admin', 'staff'], perm: 'cancel_bills' },
+  { id: 'unmatched',  en: 'Unmatched',                   hi: 'Gadbadi',                   icon: 'fa-triangle-exclamation',roles: ['admin', 'staff'], perm: 'view_unmatched' },
+  { id: 'import',     en: 'Import Data',                 hi: 'Data Daalo',                icon: 'fa-file-import',         roles: ['admin', 'staff'], perm: 'import_data' },
+  { id: 'users',      en: 'Users',                       hi: 'Users',                     icon: 'fa-users-gear',          roles: ['admin'] },
+  { id: 'settings',   en: 'Settings',                    hi: 'Settings',                  icon: 'fa-gear',                roles: ['admin'] },
+];
+
+/* ================= error boundary — a crash must NEVER blank the page =================== */
+
+class ErrorBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) { console.error('ErrorBoundary:', err, info); }
+  render() {
+    if (this.state.err) {
+      return (
+        <div className="panel">
+          <div className="alert err">
+            <i className="fa-solid fa-circle-exclamation"></i>
+            {this.props.label || 'This section'} hit an error: {String((this.state.err && this.state.err.message) || this.state.err)}
+            <button onClick={() => this.setState({ err: null })}>Retry</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/* ================= native table (search + sort + pagination, no jQuery) ================= */
+
+/** The value a column filters/searches on: filterValue > exportValue > value > raw field.
+    (exportValue is reused here because most computed columns already define it for Excel export —
+    same "what does this column really mean" value works for filtering.) */
+function colFilterVal_(col, r) {
+  if (col.filterValue) return col.filterValue(r);
+  if (col.exportValue) return col.exportValue(r);
+  if (col.value) return col.value(r);
+  return r[col.key];
+}
+
+/** Position a popover panel anchored to a button via a portal to document.body with
+    position:fixed — this is what actually avoids the panel getting clipped when the anchor sits
+    inside a scrolling/sticky container (e.g. a sticky table header inside .tbl-scroll: an
+    absolutely-positioned child there gets cut off by the scroll container's overflow, no matter
+    how high its z-index is). Closes itself on scroll (position would otherwise go stale) or resize. */
+function usePopoverPosition(open, anchorRef, panelRef, onClose, opts) {
+  var align = (opts && opts.align) || 'left';
+  var assumedW = (opts && opts.width) || 260;
+  var assumedH = (opts && opts.height) || 300;
+  const [pos, setPos] = useState(null);
+
+  useLayoutEffect(() => {
+    if (!open || !anchorRef.current) { setPos(null); return; }
+    function place() {
+      if (!anchorRef.current) return;
+      const r = anchorRef.current.getBoundingClientRect();
+      let left = align === 'right' ? r.right - assumedW : r.left;
+      if (left < 8) left = 8;
+      if (left + assumedW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - assumedW - 8);
+      let top = r.bottom + 4;
+      if (top + assumedH > window.innerHeight - 8 && r.top - assumedH - 4 > 8) top = r.top - assumedH - 4;
+      setPos({ top, left });
+    }
+    place();
+    // Scrolling something on the page (the table under it, the sidebar, the page itself) means
+    // the anchor button likely moved, so close rather than show a now-misplaced panel. But
+    // scrolling INSIDE the panel itself — its own checkbox list, e.g. while ticking boxes near
+    // the bottom — must NOT close it; that was the bug (dropdown vanishing on drag/select).
+    function onScroll(e) {
+      if (panelRef && panelRef.current && e.target && panelRef.current.contains(e.target)) return;
+      onClose();
+    }
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', place);
+    return () => { window.removeEventListener('scroll', onScroll, true); window.removeEventListener('resize', place); };
+  }, [open]);
+
+  return pos;
+}
+
+/** Excel-style per-column filter: a funnel icon in the header opens a searchable checkbox list.
+    The option list is cascading — it only shows values that survive every OTHER active filter
+    (column filters + the table search box), so picking a value in one column narrows what the
+    next column's dropdown offers, same as Excel's AutoFilter. */
+function ColumnFilterMenu({ options, selected, onChange }) {
+  const { L } = useLang();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
+  const pos = usePopoverPosition(open, btnRef, panelRef, () => setOpen(false), { align: 'right', width: 240, height: 300 });
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e) {
+      if (btnRef.current && btnRef.current.contains(e.target)) return;
+      if (panelRef.current && panelRef.current.contains(e.target)) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+  useEffect(() => { if (!open) setQ(''); }, [open]);
+
+  function toggle(opt) {
+    onChange(selected.indexOf(opt) > -1 ? selected.filter(x => x !== opt) : [...selected, opt]);
+  }
+
+  const needle = q.trim().toLowerCase();
+  const visible = needle ? options.filter(o => String(o).toLowerCase().indexOf(needle) > -1) : options;
+  const active = selected.length > 0;
+
+  return (
+    <span className="colf" onClick={e => e.stopPropagation()}>
+      <button ref={btnRef} type="button" className={'colf-btn' + (active ? ' active' : '')} onClick={() => setOpen(o => !o)}
+        title={L('Filter this column', 'Is column ko filter karo')}>
+        <i className="fa-solid fa-filter"></i>
+      </button>
+      {open && pos && ReactDOM.createPortal(
+        <div className="msel-panel colf-panel" ref={panelRef} style={{ top: pos.top, left: pos.left }}>
+          {options.length > 6 && (
+            <input type="text" className="msel-search" value={q} onChange={e => setQ(e.target.value)}
+              placeholder={L('Search…', 'Dhundo…')} autoFocus />
+          )}
+          <div className="msel-actions">
+            <button type="button" onClick={() => onChange(dedupe_(selected.concat(visible)))}>{L('Select all', 'Sab Select')}</button>
+            <button type="button" onClick={() => onChange(selected.filter(s => visible.indexOf(s) < 0))}>{L('Clear', 'Clear')}</button>
+          </div>
+          {visible.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted)', padding: '4px 2px' }}>{L('No match.', 'Kuch nahi mila.')}</div>}
+          {visible.map(opt => (
+            <label key={String(opt)}>
+              <input type="checkbox" checked={selected.indexOf(opt) > -1} onChange={() => toggle(opt)} />
+              {opt === '' || opt == null ? <i>({L('blank', 'khaali')})</i> : String(opt)}
+            </label>
+          ))}
+        </div>,
+        document.body
+      )}
+    </span>
+  );
+}
+
+function NativeTable({ columns, rows, pageSize = 25, defaultSort, pinFn, getRowClass, emptyText, onRowClick }) {
+  const [q, setQ] = useState('');
+  const [colFilters, setColFilters] = useState({}); // { colKey: [selected values] }
+  const [sort, setSort] = useState(defaultSort || { key: columns[0].key, dir: 'asc' });
+  const [page, setPage] = useState(0);
+
+  useEffect(() => { setPage(0); }, [q, rows, colFilters]);
+
+  // text search across all columns
+  const searched = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return rows;
+    return rows.filter(r => columns.some(c => {
+      const v = c.search ? c.search(r) : (c.value ? c.value(r) : r[c.key]);
+      return String(v == null ? '' : v).toLowerCase().indexOf(needle) > -1;
+    }));
+  }, [rows, q, columns]);
+
+  function passesColFilters(r, exceptKey) {
+    return columns.every(c => {
+      if (c.key === exceptKey) return true;
+      const sel = colFilters[c.key];
+      if (!sel || sel.length === 0) return true;
+      return sel.indexOf(colFilterVal_(c, r)) > -1;
+    });
+  }
+
+  // cascading options for one column's dropdown: searched rows, narrowed by every OTHER
+  // column's active filter (but not this column's own — so you can still widen it back).
+  // Keeps 0 and '' as real, selectable values (unlike uniqueSorted, which drops falsy values —
+  // fine for name lists, wrong here since a qty/balance column can legitimately be 0).
+  function columnOptions(col) {
+    const base = searched.filter(r => passesColFilters(r, col.key));
+    const set = new Set();
+    base.forEach(r => { const v = colFilterVal_(col, r); if (v !== null && v !== undefined) set.add(v); });
+    return Array.from(set).sort((a, b) => {
+      if (typeof a === 'number' && typeof b === 'number') return a - b;
+      return String(a).localeCompare(String(b));
+    });
+  }
+
+  const colFiltered = useMemo(() => searched.filter(r => passesColFilters(r, null)),
+    [searched, colFilters, columns]);
+
+  const activeColFilterCount = Object.keys(colFilters).filter(k => (colFilters[k] || []).length > 0).length;
+
+  const sorted = useMemo(() => {
+    const col = columns.find(c => c.key === sort.key);
+    const arr = colFiltered.slice();
+    arr.sort((a, b) => {
+      if (pinFn) { const pa = pinFn(a), pb = pinFn(b); if (pa !== pb) return pb - pa; }
+      if (!col) return 0;
+      let va = col.sortValue ? col.sortValue(a) : (col.value ? col.value(a) : a[col.key]);
+      let vb = col.sortValue ? col.sortValue(b) : (col.value ? col.value(b) : b[col.key]);
+      if (va == null) va = -Infinity;
+      if (vb == null) vb = -Infinity;
+      if (typeof va === 'string' || typeof vb === 'string') { va = String(va).toLowerCase(); vb = String(vb).toLowerCase(); }
+      const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+      return sort.dir === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  }, [colFiltered, sort, columns, pinFn]);
+
+  const pages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const cur = Math.min(page, pages - 1);
+  const slice = sorted.slice(cur * pageSize, cur * pageSize + pageSize);
+
+  function clickSort(key, sortable) {
+    if (sortable === false) return;
+    setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  }
+
+  return (
+    <div>
+      <div className="tbl-toolbar">
+        <div className="search">
+          <i className="fa-solid fa-magnifying-glass" style={{ color: 'var(--muted)' }}></i>
+          <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search…" />
+        </div>
+        {activeColFilterCount > 0 && (
+          <button type="button" className="chip active" onClick={() => setColFilters({})}>
+            <i className="fa-solid fa-filter-circle-xmark"></i> {activeColFilterCount} column filter{activeColFilterCount === 1 ? '' : 's'} — clear
+          </button>
+        )}
+        <div className="count">{sorted.length} row{sorted.length === 1 ? '' : 's'}</div>
+      </div>
+
+      <div className="tbl-scroll">
+        <table className="ntable">
+          <thead>
+            <tr>{columns.map(c => (
+              <th key={c.key}
+                  className={(c.align === 'right' ? 'num ' : '') + (c.sortable === false ? '' : 'sortable')}
+                  onClick={() => clickSort(c.key, c.sortable)}>
+                {c.label}
+                {sort.key === c.key && (
+                  <i className={'fa-solid ' + (sort.dir === 'asc' ? 'fa-caret-up' : 'fa-caret-down')} style={{ marginLeft: 4 }}></i>
+                )}
+                {c.filterable !== false && (
+                  <ColumnFilterMenu options={columnOptions(c)} selected={colFilters[c.key] || []}
+                    onChange={sel => setColFilters(f => ({ ...f, [c.key]: sel }))} />
+                )}
+              </th>
+            ))}</tr>
+          </thead>
+          <tbody>
+            {slice.length === 0 && <tr><td className="empty" colSpan={columns.length}>{emptyText || 'No rows'}</td></tr>}
+            {slice.map((r, i) => (
+              <tr key={i}
+                  className={(getRowClass ? getRowClass(r) : '') + (onRowClick ? ' clickable-row' : '')}
+                  onClick={onRowClick ? () => onRowClick(r) : undefined}>
+                {columns.map(c => (
+                  <td key={c.key} data-label={c.label} className={c.align === 'right' ? 'num' : ''}>
+                    {c.render ? c.render(r) : (r[c.key] == null ? '' : String(r[c.key]))}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="pager">
+        <button disabled={cur === 0} onClick={() => setPage(cur - 1)}><i className="fa-solid fa-chevron-left"></i> Prev</button>
+        <span>Page {cur + 1} / {pages}</span>
+        <button disabled={cur >= pages - 1} onClick={() => setPage(cur + 1)}>Next <i className="fa-solid fa-chevron-right"></i></button>
+      </div>
+    </div>
+  );
+}
+
+/* ================= charts ================= */
+
+function useChart(makeConfig, deps) {
+  const ref = useRef(null);
+  const chartRef = useRef(null);
+  useEffect(() => {
+    if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; }
+    const cfg = makeConfig();
+    if (ref.current && cfg) chartRef.current = new Chart(ref.current, cfg);
+    return () => { if (chartRef.current) { chartRef.current.destroy(); chartRef.current = null; } };
+  }, deps);
+  return ref;
+}
+
+function GroupBarChart({ data }) {
+  const { L, lang } = useLang();
+  const ref = useChart(() => {
+    if (!data || !data.length) return null;
+    const top = data.slice(0, 15);
+    return {
+      type: 'bar',
+      data: { labels: top.map(d => d.group), datasets: [{ label: L('Dead ₹', 'Atka hua ₹'), data: top.map(d => d.dead_value), backgroundColor: '#2a4d86', borderRadius: 4 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => inr(c.raw) } } },
+        scales: { x: { ticks: { callback: v => inr(v) } } },
+      },
+    };
+  }, [data, lang]);
+  if (!data || !data.length) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>{L('No dead stock by group.', 'Kisi bhi group mein atka maal nahi hai.')}</p>;
+  return <div className="chart-box"><canvas ref={ref}></canvas></div>;
+}
+
+function StatusDonut({ s }) {
+  const { L, lang } = useLang();
+  const ref = useChart(() => {
+    if (!s) return null;
+    return {
+      type: 'doughnut',
+      data: {
+        labels: [L('Selling', 'Bik Raha'), L('Slow', 'Dheema'), L('Dead', 'Atka Hua'), L('Stale', 'Purana Pada')],
+        datasets: [{
+          data: [s.sellingCount || 0, s.slowCount || 0, s.deadCount || 0, s.staleCount || 0],
+          backgroundColor: ['#2e7d32', '#f9a825', '#c62828', '#ef6c00'],
+        }],
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } },
+    };
+  }, [s, lang]);
+  return <div className="chart-box"><canvas ref={ref}></canvas></div>;
+}
+
+function TopSalesChart({ data }) {
+  const { L, lang } = useLang();
+  const ref = useChart(() => {
+    if (!data || !data.length) return null;
+    const top = data.slice(0, 8);
+    return {
+      type: 'bar',
+      data: { labels: top.map(d => d.salesman), datasets: [{ label: L('Sales ₹', 'Bikri ₹'), data: top.map(d => d.total_amount), backgroundColor: '#4f8cff', borderRadius: 4 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => inr(c.raw) } } },
+        scales: { y: { ticks: { callback: v => inr(v) } } },
+      },
+    };
+  }, [data, lang]);
+  if (!data || !data.length) return <p style={{ color: 'var(--muted)', fontSize: 13 }}>{L('No sales in this window.', 'Is period mein koi bikri nahi hui.')}</p>;
+  return <div className="chart-box"><canvas ref={ref}></canvas></div>;
+}
+
+/* ================= Dashboard (landing) ================= */
+
+function DashboardHome({ data, goto, role }) {
+  const { L } = useLang();
+  const s = data.summary || {};
+  const cards = [
+    { cls: 'dead',  label: L('Dead Stock Value', 'Atka Hua Maal (₹)'),         value: inr(s.deadValue),
+      sub: L('stock × price of DEAD items — click to see them', 'DEAD items ka stock × price — click karke dekho'),
+      onClick: () => goto('fullreport', { status: ['DEAD'] }) },
+    { cls: 'dead',  label: L('Dead Items', 'Na Bikne Wale Items'),             value: num(s.deadCount || 0),
+      sub: L('bought but not selling — click to see them', 'khareeda gaya par bik nahi raha — click karke dekho'),
+      onClick: () => goto('fullreport', { status: ['DEAD'] }) },
+    { cls: '',      label: L('Stale Items', 'Purane Pade Items'),              value: num(s.staleCount || 0),
+      sub: L('in stock, no movement — click to see them', 'stock mein hai, movement nahi — click karke dekho'),
+      onClick: () => goto('fullreport', { status: ['STALE'] }) },
+    { cls: 'good',  label: L('Total Stock Value', 'Kul Stock Value'),          value: inr(s.totalStockValue),
+      sub: L('all positive stock — click to see full list', 'sabhi positive stock — poori list dekho'),
+      onClick: () => goto('fullreport', {}) },
+    { cls: 'amber', label: L('Negative-Stock Items', 'Negative Stock Items'),  value: num(s.negativeCount || 0),
+      sub: L('data issue — click to see them', 'data ki galti — click karke dekho'),
+      onClick: () => goto('fullreport', { status: ['NEGATIVE'] }) },
+    { cls: 'good',  label: L('Sold in Window', 'Is Period Mein Bikri'),        value: inr(s.soldInWindow),
+      sub: L('net sales, last ' + data.windowDays + ' days — click for the full report', 'pichhle ' + data.windowDays + ' din ki bikri — poori report dekho'),
+      onClick: () => goto('fullreport', {}) },
+  ];
+  return (
+    <>
+      {data.unmatched && data.unmatched.length > 0 && role === 'admin' && (
+        <div className="alert">
+          <i className="fa-solid fa-triangle-exclamation"></i>
+          {L(data.unmatched.length + ' items unmatched / group-mismatch — clean in Busy',
+             data.unmatched.length + ' items mein gadbadi / group-mismatch — Busy mein thik karo')}
+          <button onClick={() => goto('unmatched')}>{L('View', 'Dekho')}</button>
+        </div>
+      )}
+
+      <div className="kpis">
+        {cards.map((c, i) => {
+          const clickable = role === 'admin';
+          return (
+            <div className={'kpi ' + c.cls + (clickable ? ' clickable' : '')} key={i}
+                 role={clickable ? 'button' : undefined} tabIndex={clickable ? 0 : undefined}
+                 onClick={clickable ? c.onClick : undefined}
+                 onKeyDown={clickable ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); c.onClick(); } }) : undefined}>
+              <div className="label">{c.label}</div>
+              <div className="value">{c.value}</div>
+              <div className="sub">{clickable ? c.sub : c.sub.split(' — ')[0]}</div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="chart-grid">
+        <div className="panel">
+          <h2>{L('Dead stock ₹ by group', 'Group ke hisaab se atka hua maal (₹)')}</h2>
+          <GroupBarChart data={data.groupDeadValue} />
+        </div>
+        <div className="panel">
+          <h2>{L('Stock status split', 'Stock status ka baantwara')}</h2>
+          <StatusDonut s={s} />
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>{L('Top salespersons by sales ₹', 'Top salesman (bikri ₹ ke hisaab se)')} <small>· {L('last ' + data.windowDays + ' days', 'pichhle ' + data.windowDays + ' din')}</small></h2>
+        <TopSalesChart data={data.salesmanSales} />
+      </div>
+    </>
+  );
+}
+
+/* ================= Full Report helpers (filters, aggregation, export) ================= */
+
+/** "1300 CHOICE G/M, ABC TRADERS +2 more" -> ['1300 CHOICE G/M', 'ABC TRADERS'] (drops the "+N more" tail). */
+function parseSuppliers(str) {
+  return String(str || '').split(',').map(s => s.trim()).filter(s => s && !/^\+\d+\s*more$/i.test(s));
+}
+function uniqueSorted(list) { return Array.from(new Set(list.filter(Boolean))).sort(); }
+/** Dedupe WITHOUT dropping falsy values (0, '') — unlike uniqueSorted, safe for "select all" on
+    filter panels whose options can legitimately include 0 or blank. */
+function dedupe_(list) { return Array.from(new Set(list)); }
+
+/** Sum `valueFn(row)` into each of `keysFn(row)` (a row can contribute to more than one key
+    e.g. an item with two suppliers splits its value between them), then sort desc. */
+function aggregateByDim(rows, keysFn, valueFn) {
+  const map = {};
+  rows.forEach(r => {
+    const keys = keysFn(r);
+    if (!keys.length) return;
+    const val = valueFn(r) / keys.length;
+    keys.forEach(k => { map[k] = (map[k] || 0) + val; });
+  });
+  return Object.keys(map).map(k => ({ key: k, value: map[k] })).sort((a, b) => b.value - a.value);
+}
+
+function SimpleBarChart({ labels, values, color }) {
+  const ref = useChart(() => {
+    if (!labels || !labels.length) return null;
+    return {
+      type: 'bar',
+      data: { labels, datasets: [{ data: values, backgroundColor: color || '#2a4d86', borderRadius: 4 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => inr(c.raw) } } },
+        scales: { x: { ticks: { callback: v => inr(v) } } },
+      },
+    };
+  }, [labels, values, color]);
+  if (!labels || !labels.length) return null;
+  return <div className="chart-box" style={{ height: 240 }}><canvas ref={ref}></canvas></div>;
+}
+
+/** Checkbox-panel multi-select filter. `selected` = [] means "all" (no filter applied).
+    Has its own search box when there are enough options to make scanning them impractical. */
+function MultiSelect({ label, allLabel, options, selected, onChange, searchPlaceholder }) {
+  const { L } = useLang();
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
+  const pos = usePopoverPosition(open, btnRef, panelRef, () => setOpen(false), { align: 'left', width: 260, height: 300 });
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e) {
+      if (btnRef.current && btnRef.current.contains(e.target)) return;
+      if (panelRef.current && panelRef.current.contains(e.target)) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  useEffect(() => { if (!open) setQ(''); }, [open]);
+
+  function toggle(opt) {
+    onChange(selected.indexOf(opt) > -1 ? selected.filter(x => x !== opt) : [...selected, opt]);
+  }
+
+  const summary = selected.length === 0 ? allLabel
+    : selected.length <= 2 ? selected.join(', ')
+    : selected.length + ' selected';
+
+  const needle = q.trim().toLowerCase();
+  const visibleOptions = needle ? options.filter(o => String(o).toLowerCase().indexOf(needle) > -1) : options;
+
+  return (
+    <div className="msel">
+      <label>{label}</label>
+      <button ref={btnRef} type="button" className="msel-btn" onClick={() => setOpen(o => !o)}>
+        <span className="txt">{summary}</span>
+        <i className={'fa-solid ' + (open ? 'fa-caret-up' : 'fa-caret-down')} style={{ color: 'var(--muted)', flexShrink: 0 }}></i>
+      </button>
+      {open && pos && ReactDOM.createPortal(
+        <div className="msel-panel" ref={panelRef} style={{ top: pos.top, left: pos.left }}>
+          {options.length > 6 && (
+            <input type="text" className="msel-search" value={q} onChange={e => setQ(e.target.value)}
+              placeholder={searchPlaceholder || L('Search…', 'Dhundo…')} autoFocus />
+          )}
+          <div className="msel-actions">
+            <button type="button" onClick={() => onChange(dedupe_(selected.concat(visibleOptions)))}>{L('Select all', 'Sab Select')}</button>
+            <button type="button" onClick={() => onChange(selected.filter(s => visibleOptions.indexOf(s) < 0))}>{L('Clear', 'Clear')}</button>
+          </div>
+          {visibleOptions.length === 0 && <div style={{ fontSize: 12, color: 'var(--muted)', padding: '4px 2px' }}>{L('No match.', 'Kuch nahi mila.')}</div>}
+          {visibleOptions.map(opt => (
+            <label key={opt}>
+              <input type="checkbox" checked={selected.indexOf(opt) > -1} onChange={() => toggle(opt)} />
+              {opt}
+            </label>
+          ))}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
+/**
+ * Age-based sell-through target ("return candidate" check): how much of what was purchased
+ * should be sold by now, counting from the LAST purchase date. 10+ days -> 50%, 20+ days -> 75%,
+ * 30+ days -> 100%. Before 10 days there's no target yet (too early to judge).
+ * GRACE_PCT gives a couple of points of slack either way before something is flagged.
+ * LIMITATION: this reads Items' lifetime cumulative purchased/sold — there is no lot/batch
+ * tracking (Busy doesn't provide it either), so for an item bought more than once
+ * (purchase_entries > 1) the % mixes old and new stock. Such rows carry a "Repeat" badge in the
+ * UI so the number is read as an estimate, not an exact per-batch figure.
+ */
+const SELL_TARGET_TIERS = [ { days: 30, pct: 100 }, { days: 20, pct: 75 }, { days: 10, pct: 50 } ];
+const SELL_TARGET_GRACE_PCT = 2;
+function expectedSellPct(daysSincePurchase) {
+  if (daysSincePurchase == null) return null;
+  for (let i = 0; i < SELL_TARGET_TIERS.length; i++) {
+    if (daysSincePurchase >= SELL_TARGET_TIERS[i].days) return SELL_TARGET_TIERS[i].pct;
+  }
+  return null;
+}
+
+const STATUS_LEGEND = [
+  { code: 'DEAD',     en: 'Bought but not selling at all — biggest concern', hi: 'Khareeda gaya, bilkul bik nahi raha — sabse zyada dhyan do' },
+  { code: 'STALE',    en: 'No recent buying or selling movement',            hi: 'Haal mein na kharid na bikri' },
+  { code: 'SLOW',     en: 'Selling, but slowly',                             hi: 'Bik raha hai, par dheere' },
+  { code: 'SELLING',  en: 'Selling normally — healthy',                      hi: 'Normal bik raha hai — theek hai' },
+  { code: 'CLEARED',  en: 'Fully sold — nothing pending',                    hi: 'Pura bik gaya — kuch pending nahi' },
+  { code: 'NEGATIVE', en: 'Stock shows negative — data-entry issue in Busy', hi: 'Stock negative — Busy mein data ki galti' },
+];
+
+/* ================= Full Report (self-contained — fetches its own data) ================= */
+
+function FullReportView({ initialFilter }) {
+  const { L, lang } = useLang();
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState(null);
+  const [days, setDays] = useState(30);
+  const [showAll, setShowAll] = useState(!!(initialFilter && initialFilter.showAll));
+  const [group, setGroup] = useState((initialFilter && initialFilter.group) || []);
+  const [itemName, setItemName] = useState((initialFilter && initialFilter.itemName) || []);
+  const [salesman, setSalesman] = useState((initialFilter && initialFilter.salesman) || []);
+  const [supplier, setSupplier] = useState((initialFilter && initialFilter.supplier) || []);
+  const [status, setStatus] = useState((initialFilter && initialFilter.status) || []);
+  const [balanceMode, setBalanceMode] = useState('all'); // all | nonzero | zero
+  const [onlyBehind, setOnlyBehind] = useState(false);
+  const [onlyReliable, setOnlyReliable] = useState(false);
+
+  function load() {
+    setRows(null); setErr(null);
+    authed('getItemReport', [], 120000)
+      .then(res => {
+        if (res && res.authError) return;
+        if (!res || !res.ok) { setErr((res && res.message) || 'Could not load report.'); return; }
+        setRows(res);
+      })
+      .catch(e => setErr(e.message || String(e)));
+  }
+  useEffect(() => { load(); }, []);
+
+  // Step 1 — day scope (the base every other filter narrows from; changing group/salesman/etc
+  // below never resets this or each other, they all just stack on top). Also where the
+  // age-based sell-through target (_targetPct/_actualPct/_behindTarget) gets computed.
+  const dayScoped = useMemo(() => {
+    if (!rows) return [];
+    return rows.rows
+      .filter(r => showAll || (r.days_since_purchase != null && r.days_since_purchase <= days))
+      .map(r => {
+        const actualPct = r.net_purchase_qty > 0 ? (r.sale_qty / r.net_purchase_qty * 100) : 0;
+        const targetPct = expectedSellPct(r.days_since_purchase);
+        return Object.assign({}, r, {
+          _actualPct: actualPct, _targetPct: targetPct,
+          _behindTarget: targetPct != null && actualPct < (targetPct - SELL_TARGET_GRACE_PCT),
+          _isRepeat: (r.purchase_entries || 0) > 1
+        });
+      });
+  }, [rows, days, showAll]);
+
+  const groupOptions    = useMemo(() => uniqueSorted(dayScoped.map(r => r.group)), [dayScoped]);
+  const itemOptions     = useMemo(() => uniqueSorted(dayScoped.map(r => r.details)), [dayScoped]);
+  const salesmanOptions = useMemo(() => uniqueSorted(dayScoped.flatMap(r => r.salesmen || [])), [dayScoped]);
+  const supplierOptions = useMemo(() => uniqueSorted(dayScoped.flatMap(r => parseSuppliers(r.suppliers))), [dayScoped]);
+
+  // Step 2 — the dimension filters, independent of each other, of balance-mode and of the
+  // behind-target toggle (zeroRows below is built from this and stays unaffected by either).
+  const dimFiltered = useMemo(() => dayScoped
+    .filter(r => group.length === 0 || group.indexOf(r.group) > -1)
+    .filter(r => itemName.length === 0 || itemName.indexOf(r.details) > -1)
+    .filter(r => salesman.length === 0 || (r.salesmen || []).some(s => salesman.indexOf(s) > -1))
+    .filter(r => supplier.length === 0 || parseSuppliers(r.suppliers).some(s => supplier.indexOf(s) > -1))
+    .filter(r => status.length === 0 || status.indexOf(r.status) > -1),
+  [dayScoped, group, itemName, salesman, supplier, status]);
+
+  // Step 3 — balance mode + behind-target + reliable-only toggles on top (drives table + charts).
+  const filtered = useMemo(() => dimFiltered
+    .filter(r => balanceMode === 'all' ? true : balanceMode === 'zero' ? r.pending_balance === 0 : r.pending_balance !== 0)
+    .filter(r => !onlyBehind || r._behindTarget)
+    .filter(r => !onlyReliable || !r._isRepeat),
+  [dimFiltered, balanceMode, onlyBehind, onlyReliable]);
+
+  // Always-available zero-balance slice (same dimension filters, ignores balance-mode) — this is
+  // exactly what goes into the separate "Zero Balance" sheet on export.
+  const zeroRows = useMemo(() => dimFiltered.filter(r => r.pending_balance === 0), [dimFiltered]);
+
+  // Executive summary numbers, computed from the same `filtered` set the table shows.
+  const kpi = useMemo(() => {
+    const purQty = filtered.reduce((s, r) => s + r.purchase_qty, 0);
+    const saleQty = filtered.reduce((s, r) => s + r.sale_qty, 0);
+    const pendingQty = filtered.reduce((s, r) => s + Math.max(0, r.pending_balance), 0);
+    const pendingVal = filtered.reduce((s, r) => s + Math.max(0, r.pending_value), 0);
+    const zeroCount = filtered.filter(r => r.pending_balance === 0).length;
+    const negCount = filtered.filter(r => r.pending_balance < 0).length;
+    const behindItems = filtered.filter(r => r._behindTarget);
+    return {
+      items: filtered.length, purQty, saleQty, pendingQty, pendingVal, zeroCount, negCount,
+      soldPct: purQty > 0 ? (saleQty / purQty * 100) : 0,
+      suppliers: uniqueSorted(filtered.flatMap(r => parseSuppliers(r.suppliers))).length,
+      salesmen: uniqueSorted(filtered.flatMap(r => r.salesmen || [])).length,
+      behindCount: behindItems.length,
+      behindValue: behindItems.reduce((s, r) => s + Math.max(0, r.pending_value), 0),
+    };
+  }, [filtered]);
+
+  const byGroup    = useMemo(() => aggregateByDim(filtered, r => [r.group || '(no group)'], r => Math.max(0, r.pending_value)).slice(0, 12), [filtered]);
+  const bySalesman = useMemo(() => aggregateByDim(filtered, r => (r.salesmen && r.salesmen.length ? r.salesmen : ['(unknown)']), r => Math.max(0, r.pending_value)).slice(0, 12), [filtered]);
+  const bySupplier = useMemo(() => aggregateByDim(filtered, r => { const s = parseSuppliers(r.suppliers); return s.length ? s : ['(unknown)']; }, r => Math.max(0, r.pending_value)).slice(0, 12), [filtered]);
+  const statusCounts = useMemo(() => {
+    const m = {};
+    filtered.forEach(r => { m[r.status] = (m[r.status] || 0) + 1; });
+    return m;
+  }, [filtered]);
+
+  const columns = [
+    { key: 'group', label: L('Group', 'Group') },
+    { key: 'details', label: L('Item Details', 'Item ka Naam') },
+    // ---- headline columns first: what to DO about this item, no scrolling needed ----
+    { key: '_action', label: L('Action', 'Action'), sortValue: r => r._behindTarget ? 2 : r._targetPct == null ? 1 : 0,
+      render: r => r._behindTarget
+        ? <span className="pill RETURNCAND">{L('RETURN CANDIDATE', 'RETURN CANDIDATE')}</span>
+        : r._targetPct == null
+          ? <span className="pill UNKNOWN">{L('Waiting', 'Wait Karo')}</span>
+          : <span className="pill OK">{L('OK', 'OK')}</span>,
+      exportValue: r => r._behindTarget ? 'RETURN CANDIDATE' : r._targetPct == null ? 'Waiting' : 'OK' },
+    { key: '_targetPct', label: L('Target %', 'Target %'), align: 'right', sortValue: r => r._targetPct == null ? -1 : r._targetPct,
+      render: r => r._targetPct == null
+        ? <span style={{ color: 'var(--muted)' }}>{L('too early', 'abhi jaldi hai')}<br /><small>{r.days_since_purchase == null ? '' : '(' + r.days_since_purchase + '/10 ' + L('days', 'din') + ')'}</small></span>
+        : r._targetPct + '%',
+      exportValue: r => r._targetPct == null ? '' : r._targetPct },
+    { key: '_actualPct', label: L('Actual %', 'Actual %'), align: 'right', sortValue: r => r._actualPct,
+      render: r => <b style={{ color: r._behindTarget ? 'var(--dead)' : 'var(--selling)' }}>{r._actualPct.toFixed(0)}%</b>,
+      exportValue: r => Math.round(r._actualPct * 100) / 100 },
+    // ---- buy / sell / balance — kept together on purpose ----
+    { key: 'purchase_qty', label: L('Purchase Qty', 'Kharid Qty'), align: 'right', sortValue: r => r.purchase_qty, render: r => num(r.purchase_qty) },
+    { key: 'purchase_return_qty', label: L('Purchase Return Qty', 'Purchase Return'), align: 'right', sortValue: r => r.purchase_return_qty, render: r => num(r.purchase_return_qty) },
+    { key: 'net_purchase_qty', label: L('Net Purchase Qty', 'Net Kharid'), align: 'right', sortValue: r => r.net_purchase_qty, render: r => num(r.net_purchase_qty) },
+    { key: 'sale_qty', label: L('Sale Qty', 'Bikri Qty'), align: 'right', sortValue: r => r.sale_qty, render: r => num(r.sale_qty) },
+    { key: 'sale_entries', label: L('Sale Entries', 'Kitni Baar Bika'), align: 'right', sortValue: r => r.sale_entries, render: r => num(r.sale_entries) },
+    { key: 'pending_balance', label: L('Pending Balance', 'Bacha Hua Balance'), align: 'right', sortValue: r => r.pending_balance,
+      render: r => <b style={{ color: r.pending_balance < 0 ? 'var(--dead)' : r.pending_balance === 0 ? 'var(--muted)' : 'inherit' }}>{num(r.pending_balance)}</b> },
+    { key: 'status', label: L('Status', 'Status'), sortValue: r => STATUS_LIST.indexOf(r.status),
+      render: r => <span className={'pill ' + r.status}>{r.status}</span>, exportValue: r => r.status },
+    { key: 'purchase_entries', label: L('Purchase Entries', 'Kitni Baar Khareeda'), align: 'right', sortValue: r => r.purchase_entries,
+      render: r => <span title={r._isRepeat ? L('Repeat purchase — % mixes old + new stock', 'Repeat purchase — % purane + naye stock ko mila ke hai') : ''}>
+        {num(r.purchase_entries)} {r._isRepeat && <span className="pill STALE" style={{ marginLeft: 4 }}>{L('Repeat', 'Repeat')}</span>}
+      </span>,
+      exportValue: r => r.purchase_entries },
+    { key: 'sale_rate_avg', label: L('Sale Rate (Avg)', 'Bikri Rate (Avg)'), align: 'right', sortValue: r => r.sale_rate_avg,
+      render: r => r.sale_qty > 0 ? inr(r.sale_rate_avg) : <span style={{ color: 'var(--muted)' }}>{L('not sold', 'nahi bika')}</span>,
+      exportValue: r => r.sale_qty > 0 ? r.sale_rate_avg : '' },
+    // ---- who — kept together ----
+    { key: 'suppliers', label: L('Supplier(s)', 'Supplier') },
+    { key: 'salesmen', label: L('Salesman(s)', 'Salesman'),
+      render: r => (r.salesmen && r.salesmen.length ? r.salesmen.join(', ') : '—'),
+      exportValue: r => (r.salesmen || []).join(', ') },
+    // ---- dates — kept together ----
+    { key: 'first_purchase_date', label: L('First Purchase Date', 'Pehli Kharid'), render: r => fmtDate(r.first_purchase_date) || '—' },
+    { key: 'last_purchase_date', label: L('Last Purchase Date', 'Aakhri Kharid'), render: r => fmtDate(r.last_purchase_date) || '—' },
+    { key: 'first_sale_date', label: L('First Sale Date', 'Pehli Bikri'), render: r => fmtDate(r.first_sale_date) || '—' },
+    { key: 'last_sale_date', label: L('Last Sale Date', 'Aakhri Bikri'), render: r => fmtDate(r.last_sale_date) || '—' },
+    { key: 'days_since_purchase', label: L('Purchased how many days ago', 'Kitne Din Pehle Khareeda'), align: 'right',
+      sortValue: r => r.days_since_purchase == null ? -1 : r.days_since_purchase,
+      render: r => r.days_since_purchase == null ? '—' : r.days_since_purchase + ' ' + L('days ago', 'din pehle') },
+  ];
+
+  function exportToExcel() {
+    if (!window.XLSX) { Swal.fire({ icon: 'error', title: L('Excel export unavailable', 'Excel export uplabdh nahi'), text: L('The Excel library failed to load — check your internet connection and reload.', 'Excel library load nahi hui — internet check karke page reload karo.') }); return; }
+    const headerRow = columns.map(c => c.label);
+    const toAOA = list => [headerRow, ...list.map(r => columns.map(c => {
+      const v = c.exportValue ? c.exportValue(r) : r[c.key];
+      return v == null ? '' : v;
+    }))];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAOA(filtered)), 'Full Report');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(toAOA(zeroRows)), 'Zero Balance');
+    const stamp = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, 'Paris_Fashion_Report_' + stamp + '.xlsx');
+  }
+
+  if (err) {
+    return (
+      <div className="panel">
+        <div className="alert err"><i className="fa-solid fa-circle-exclamation"></i> {err}<button onClick={load}>{L('Retry', 'Dobara Try Karo')}</button></div>
+      </div>
+    );
+  }
+  if (!rows) return <Loader en="Loading report…" hi="Report load ho rahi hai…" />;
+
+  return (
+    <>
+      {/* ---------- Executive summary ---------- */}
+      <div className="panel">
+        <h2>{L('Executive Summary', 'Executive Summary')} <small>· {L('same filters as the table below — change anything and this updates too', 'neeche table jaisa hi filter — kuch bhi badlo, ye bhi update hoga')}</small></h2>
+
+        <div className="legend-row">
+          {STATUS_LEGEND.map(s => (
+            <span key={s.code} className="legend-item"><span className={'pill ' + s.code}>{s.code}</span> {L(s.en, s.hi)}</span>
+          ))}
+          <span className="legend-item"><b style={{ color: 'var(--dead)' }}>{L('Red number', 'Laal Number')}</b> = {L('negative pending balance (data issue)', 'negative pending balance (data ki galti)')}</span>
+          <span className="legend-item"><b style={{ color: 'var(--muted)' }}>{L('Grey number', 'Grey Number')}</b> = {L('zero pending (fully sold)', 'zero pending (pura bik gaya)')}</span>
+        </div>
+        <div className="legend-row" style={{ marginTop: 8 }}>
+          <span className="legend-item">
+            <b>{L('Row highlight colors:', 'Row Highlight Colors:')}</b>
+          </span>
+          <span className="legend-item">
+            <span style={{ display: 'inline-block', width: 14, height: 14, background: 'var(--negative-bg)', border: '1px solid var(--negative)', verticalAlign: 'middle', marginRight: 4 }}></span>
+            {L('Amber row = NEGATIVE (data error — stock shows negative, check in Busy). Highest priority.', 'Amber row = NEGATIVE (data ki galti — stock negative dikha raha hai, Busy mein check karo). Sabse zyada priority.')}
+          </span>
+          <span className="legend-item">
+            <span style={{ display: 'inline-block', width: 14, height: 14, background: 'var(--returncand-bg)', border: '1px solid var(--returncand)', verticalAlign: 'middle', marginRight: 4 }}></span>
+            {L('Purple row = RETURN CANDIDATE (missed its sell-through checkpoint — see Action column).', 'Purple row = RETURN CANDIDATE (apna sell-through checkpoint miss kiya — Action column dekho).')}
+          </span>
+          <span className="legend-item">
+            <span style={{ display: 'inline-block', width: 14, height: 14, background: 'var(--dead-bg)', border: '1px solid var(--dead)', verticalAlign: 'middle', marginRight: 4 }}></span>
+            {L('Red row = DEAD status (lifetime — not on the return-candidate checkpoint, but not selling at all).', 'Red row = DEAD status (lifetime — return-candidate checkpoint wala nahi, par bilkul bik hi nahi raha).')}
+          </span>
+          <span className="legend-item">{L('(A row gets only ONE color — the highest-priority one that applies to it.)', '(Ek row ko sirf EK color milta hai — jo sabse upar priority mein aata hai.)')}</span>
+        </div>
+
+        <div className="kpis" style={{ marginTop: 14 }}>
+          {[
+            { cls: '', label: L('Items in view', 'Items'), value: num(kpi.items), sub: L('after all filters — click to reset all filters', 'sab filters ke baad — click karke sab filter hatao'),
+              onClick: () => { setGroup([]); setItemName([]); setSalesman([]); setSupplier([]); setStatus([]); setBalanceMode('all'); setOnlyBehind(false); setOnlyReliable(false); } },
+            { cls: 'good', label: L('Sold-through', 'Bik Gaya'), value: kpi.soldPct.toFixed(0) + '%', sub: num(kpi.saleQty) + ' / ' + num(kpi.purQty) + ' ' + L('pcs', 'pcs'), onClick: null },
+            { cls: 'dead', label: L('Pending qty', 'Pending Qty'), value: num(kpi.pendingQty), sub: inr(kpi.pendingVal),
+              onClick: () => setBalanceMode('nonzero') },
+            { cls: 'amber', label: L('Zero-balance items', 'Zero Balance Items'), value: num(kpi.zeroCount), sub: L('fully sold — click to filter', 'pura bik gaya — click karke filter karo'),
+              onClick: () => setBalanceMode('zero') },
+            { cls: 'amber', label: L('Negative-balance items', 'Negative Balance Items'), value: num(kpi.negCount), sub: L('check in Busy — click to filter', 'Busy mein check karo — click karke filter karo'),
+              onClick: () => setStatus(['NEGATIVE']) },
+            { cls: 'dead', label: L('Behind sell-through target', 'Target Se Peeche'), value: num(kpi.behindCount), sub: inr(kpi.behindValue),
+              onClick: () => setOnlyBehind(true) },
+            { cls: '', label: L('Suppliers', 'Suppliers'), value: num(kpi.suppliers), sub: L('distinct, in view', 'alag-alag, is view mein'), onClick: null },
+            { cls: '', label: L('Salespeople', 'Salesman'), value: num(kpi.salesmen), sub: L('distinct, in view', 'alag-alag, is view mein'), onClick: null },
+          ].map((c, i) => (
+            <div className={'kpi ' + c.cls + (c.onClick ? ' clickable' : '')} key={i}
+                 role={c.onClick ? 'button' : undefined} tabIndex={c.onClick ? 0 : undefined}
+                 onClick={c.onClick || undefined}
+                 onKeyDown={c.onClick ? (e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); c.onClick(); } }) : undefined}>
+              <div className="label">{c.label}</div><div className="value">{c.value}</div><div className="sub">{c.sub}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="chart-grid" style={{ marginTop: 16 }}>
+          <div className="panel" style={{ boxShadow: 'none', border: '1px solid var(--border)' }}>
+            <h2 style={{ fontSize: 13 }}>{L('Pending ₹ by Group', 'Group-wise Pending ₹')}</h2>
+            {byGroup.length ? <SimpleBarChart labels={byGroup.map(x => x.key)} values={byGroup.map(x => x.value)} color="#2a4d86" /> : <p className="hint">{L('No data.', 'Data nahi.')}</p>}
+          </div>
+          <div className="panel" style={{ boxShadow: 'none', border: '1px solid var(--border)' }}>
+            <h2 style={{ fontSize: 13 }}>{L('Pending ₹ by Salesperson', 'Salesman-wise Pending ₹')}</h2>
+            {bySalesman.length ? <SimpleBarChart labels={bySalesman.map(x => x.key)} values={bySalesman.map(x => x.value)} color="#4f8cff" /> : <p className="hint">{L('No data.', 'Data nahi.')}</p>}
+          </div>
+        </div>
+        <div className="chart-grid" style={{ marginTop: 16 }}>
+          <div className="panel" style={{ boxShadow: 'none', border: '1px solid var(--border)' }}>
+            <h2 style={{ fontSize: 13 }}>{L('Pending ₹ by Supplier', 'Supplier-wise Pending ₹')}</h2>
+            {bySupplier.length ? <SimpleBarChart labels={bySupplier.map(x => x.key)} values={bySupplier.map(x => x.value)} color="#ef6c00" /> : <p className="hint">{L('No data.', 'Data nahi.')}</p>}
+          </div>
+          <div className="panel" style={{ boxShadow: 'none', border: '1px solid var(--border)' }}>
+            <h2 style={{ fontSize: 13 }}>{L('Status split', 'Status ka Baantwara')}</h2>
+            <StatusDonut s={{ sellingCount: statusCounts.SELLING, slowCount: statusCounts.SLOW, deadCount: statusCounts.DEAD, staleCount: statusCounts.STALE }} />
+          </div>
+        </div>
+        <div className="hint" style={{ marginTop: 4 }}>
+          {L('Salesman/supplier charts split an item\'s pending value equally when more than one is listed for it (no lot-tracking) — treat as a close estimate, not exact accounting.',
+             'Jab kisi item ke saath ek se zyada salesman/supplier jude hote hain, uski pending value unme barabar baant di jaati hai (lot-tracking nahi hai) — ye estimate hai, exact accounting nahi.')}
+        </div>
+      </div>
+
+      {/* ---------- Filters + export ---------- */}
+      <div className="panel">
+        <h2>{L('Full Report — filters', 'Poori Report — Filters')} <small>· {L('every item — purchase, sale, supplier and pending balance', 'har item — kharid, bikri, supplier aur pending balance')}</small></h2>
+
+        {rows.truncated && (
+          <div className="alert" style={{ marginBottom: 12 }}>
+            <i className="fa-solid fa-circle-info"></i>
+            {L('The server sent the ' + rows.rows.length.toLocaleString('en-IN') + ' most recently purchased of ' + rows.total.toLocaleString('en-IN') + ' items (payload limit) — filters below narrow further from that set.',
+               'Server se ' + rows.rows.length.toLocaleString('en-IN') + ' sabse haal ke items aaye hain (' + rows.total.toLocaleString('en-IN') + ' mein se, payload limit ki wajah se) — neeche ke filters isi set ko aur chhota karte hain.')}
+          </div>
+        )}
+
+        <div className="days-picker">
+          <label>{L('Purchase-based report: show items purchased in the last…', 'Purchase-based report: itne dino mein khareede hue items dikhao…')}</label>
+          <div className="days-row">
+            <input type="number" min="1" value={days} disabled={showAll}
+              onChange={e => setDays(Math.max(1, parseInt(e.target.value, 10) || 1))} />
+            <span className="unit">{L('days', 'din')}</span>
+            <div className="chips">
+              {QUICK_DAYS.map(d => (
+                <button type="button" key={d} disabled={showAll}
+                  className={'chip' + (!showAll && days === d ? ' active' : '')} onClick={() => { setShowAll(false); setDays(d); }}>{d}</button>
+              ))}
+            </div>
+            <label className="toggle-inline" style={{ marginLeft: 8 }}>
+              <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} />
+              {L('Show all-time (ignore days)', 'Sab dikhao (hamesha se, days ignore)')}
+            </label>
+          </div>
+          <div className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+            {showAll
+              ? L('Base set: every item ever purchased (all-time) — no date range applied. Filters below narrow this further.', 'Base set: har wo item jo kabhi khareeda gaya (hamesha se) — koi date-range nahi laga. Neeche ke filters isko aur chhota karte hain.')
+              : L('Base set: ' + dayScoped.length.toLocaleString('en-IN') + ' item(s) whose LAST purchase falls within the last ' + days + ' days. Filters below narrow this further.',
+                  'Base set: ' + dayScoped.length.toLocaleString('en-IN') + ' item(s) jinki AAKHRI kharid pichhle ' + days + ' din ke andar hui. Neeche ke filters isko aur chhota karte hain.')}
+          </div>
+        </div>
+
+        <div className="days-picker" style={{ background: '#fff8e1', borderColor: '#ffe082' }}>
+          <label>{L('Sell-through target (return-candidate check)', 'Bikri Target (Return-Candidate Check)')}</label>
+          <div className="hint" style={{ marginTop: 0 }}>
+            {L('Counting from the last purchase date: 10+ days → at least 50% sold. 20+ days → at least 75%. 30+ days → 100% (fully sold), with ' + SELL_TARGET_GRACE_PCT + '% grace on each target. Items that miss their checkpoint are marked RETURN CANDIDATE and highlighted below.',
+               'Aakhri kharid ki date se ginte hue: 10+ din → kam se kam 50% bikna chahiye. 20+ din → kam se kam 75%. 30+ din → 100% (pura bikna chahiye), har target mein ' + SELL_TARGET_GRACE_PCT + '% grace ke saath. Jo apna checkpoint miss karte hain unhe RETURN CANDIDATE mark karke neeche highlight kiya gaya hai.')}
+          </div>
+          <div className="hint" style={{ marginTop: 6 }}>
+            {L('Limitation: items bought more than once (marked "Repeat" below) mix old and new stock in this %, since there is no lot/batch tracking (Busy doesn\'t give it either) — treat those as an estimate and verify manually before returning.',
+               'Seema: jo item ek se zyada baar khareeda gaya hai ("Repeat" mark hoga) uska % purane aur naye stock ko mila ke dikhata hai, kyunki lot/batch tracking nahi hai (Busy bhi nahi deta) — unhe estimate maano aur return karne se pehle manually check kar lo.')}
+          </div>
+          <div className="hint" style={{ marginTop: 6, fontWeight: 600 }}>
+            {showAll
+              ? L('"Show all-time" is ON — every checkpoint (50% / 75% / 100%) is visible, nothing is hidden by age.',
+                  '"Show all-time" ON hai — 50% / 75% / 100% teeno checkpoint dikhenge, koi bhi purana item age ki wajah se chhupega nahi.')
+              : (days < 20
+                  ? L('With "days" = ' + days + ', only the 50% checkpoint (10+ days old) can appear here — items old enough for 75% (20+ days) or 100% (30+ days) are older than your day-filter, so they are excluded from THIS list entirely. To see them, raise "days" to 20+/30+, or tick "Show all-time" below.',
+                      '"days" = ' + days + ' hone ki wajah se sirf 50% wala checkpoint (10+ din purana) hi is list mein aa sakta hai — 75% (20+ din) ya 100% (30+ din) wale items iss din-filter se purane hain, isliye ye list unhe dikhata hi nahi. Unhe dekhne ke liye "days" ko 20+/30+ karo, ya "Show all-time" tick karo.')
+                  : (days < 30
+                      ? L('With "days" = ' + days + ', items can reach the 50% or 75% checkpoint, but 100% (30+ days old) items are older than your day-filter and are excluded from THIS list. Raise "days" to 30+, or tick "Show all-time", to see them.',
+                          '"days" = ' + days + ' hone ki wajah se 50% ya 75% checkpoint tak wale items aa sakte hain, lekin 100% (30+ din purane) items iss din-filter se purane hain, isliye ye list unhe dikhata hi nahi. Unhe dekhne ke liye "days" ko 30+ karo, ya "Show all-time" tick karo.')
+                      : L('With "days" = ' + days + ', all three checkpoints (50% / 75% / 100%) can appear.',
+                          '"days" = ' + days + ' hone ki wajah se teeno checkpoint (50% / 75% / 100%) aa sakte hain.')))}
+          </div>
+          <div className="hint" style={{ marginTop: 6 }}>
+            {L('Tip: for a complete return-candidate check across all old stock (not just recent purchases), tick "Show all-time" above — that is the right mode for this specific check.',
+               'Tip: sabhi purane stock ka poora return-candidate check karne ke liye (sirf recent purchase nahi), upar "Show all-time" tick karo — is specific check ke liye yahi sahi tareeka hai.')}
+          </div>
+          <div className="days-row" style={{ marginTop: 8 }}>
+            <label className="toggle-inline">
+              <input type="checkbox" checked={onlyBehind} onChange={e => setOnlyBehind(e.target.checked)} />
+              {L('Only return candidates', 'Sirf Return Candidates')}
+            </label>
+            <label className="toggle-inline">
+              <input type="checkbox" checked={onlyReliable} onChange={e => setOnlyReliable(e.target.checked)} />
+              {L('Only single-purchase items (100% reliable %)', 'Sirf Single-Purchase Items (100% Bharosemand %)')}
+            </label>
+          </div>
+        </div>
+
+        <div className="filters">
+          <MultiSelect label={L('Group', 'Group')} allLabel={L('All groups', 'Sabhi Groups')}
+            options={groupOptions} selected={group} onChange={setGroup} />
+          <MultiSelect label={L('Item', 'Item')} allLabel={L('All items', 'Sabhi Items')}
+            options={itemOptions} selected={itemName} onChange={setItemName} />
+          <MultiSelect label={L('Salesperson', 'Salesman')} allLabel={L('All salespeople', 'Sabhi Salesman')}
+            options={salesmanOptions} selected={salesman} onChange={setSalesman} />
+          <MultiSelect label={L('Supplier', 'Supplier')} allLabel={L('All suppliers', 'Sabhi Suppliers')}
+            options={supplierOptions} selected={supplier} onChange={setSupplier} />
+          <MultiSelect label={L('Status', 'Status')} allLabel={L('All statuses', 'Sabhi Status')}
+            options={STATUS_LIST} selected={status} onChange={setStatus} />
+        </div>
+        <div className="hint" style={{ marginTop: -6, marginBottom: 10 }}>
+          {L('Group / Salesperson / Supplier / Status now support picking more than one at a time — click to open, tick as many as you need.',
+             'Group / Salesman / Supplier / Status ab ek se zyada bhi select ho sakte hain — click karke kholo, jitne chahiye tick karo.')}
+        </div>
+
+        <div className="filters" style={{ alignItems: 'center' }}>
+          <div>
+            <label>{L('Pending balance', 'Pending Balance')}</label>
+            <div className="chips">
+              <button type="button" className={'chip' + (balanceMode === 'all' ? ' active' : '')} onClick={() => setBalanceMode('all')}>{L('All', 'Sabhi')}</button>
+              <button type="button" className={'chip' + (balanceMode === 'nonzero' ? ' active' : '')} onClick={() => setBalanceMode('nonzero')}>{L('Pending only (hide 0)', 'Sirf Pending (0 hide)')}</button>
+              <button type="button" className={'chip' + (balanceMode === 'zero' ? ' active' : '')} onClick={() => setBalanceMode('zero')}>{L('Zero balance only', 'Sirf 0 Balance')}</button>
+            </div>
+          </div>
+          <button className="btn-primary" style={{ alignSelf: 'flex-end', marginBottom: 8 }} onClick={exportToExcel}>
+            <i className="fa-solid fa-file-excel"></i> {L('Export to Excel', 'Excel Mein Export Karo')}
+          </button>
+          <button className="icon-btn" style={{ alignSelf: 'flex-end', marginBottom: 8 }} onClick={load}>
+            <i className="fa-solid fa-rotate"></i> {L('Refresh', 'Refresh')}
+          </button>
+        </div>
+        <div className="hint" style={{ marginBottom: 4 }}>
+          {L('Excel export has two sheets: "Full Report" (exactly what you see below, with every filter applied — Group/Salesman/Supplier/Status/Behind-target/Pending-balance/day) and "Zero Balance" (zero-pending items within your Group/Salesman/Supplier/Status/day filters, regardless of the Pending balance toggle).',
+             'Excel export mein do sheets hongi: "Full Report" (neeche jo dikh raha hai, wahi — Group/Salesman/Supplier/Status/Target-se-peeche/Pending-balance/din sab filters ke saath) aur "Zero Balance" (aapke Group/Salesman/Supplier/Status/din filters ke andar jo zero-pending items hain, Pending-balance toggle se bina fark).')}
+        </div>
+
+        <NativeTable
+          columns={columns}
+          rows={filtered}
+          pageSize={30}
+          defaultSort={{ key: 'last_purchase_date', dir: 'desc' }}
+          getRowClass={r => r.status === 'NEGATIVE' ? 'row-negative' : r._behindTarget ? 'row-behind' : r.status === 'DEAD' ? 'row-dead' : ''}
+          onRowClick={r => showItemDetail(r.item_key, r.details, L)}
+          emptyText={L('No items match these filters.', 'In filters se kuch nahi mila.')}
+        />
+      </div>
+    </>
+  );
+}
+
+/* ================= Cancelled Bills (cancel a bill by number, restore any time) ================= */
+
+const BILL_TYPES = [
+  { v: 'ALL', en: 'Any type', hi: 'Koi bhi type' },
+  { v: 'PURCHASE', en: 'Purchase', hi: 'Purchase' },
+  { v: 'SALE', en: 'Sale', hi: 'Sale' },
+  { v: 'PURCHASE_RETURN', en: 'Purchase Return', hi: 'Purchase Return' },
+  { v: 'SALE_RETURN', en: 'Sale Return', hi: 'Sale Return' },
+];
+
+function CancelledBillsView() {
+  const { L } = useLang();
+  const [billNo, setBillNo] = useState('');
+  const [billType, setBillType] = useState('ALL');
+  const [busy, setBusy] = useState(false);
+  const [bills, setBills] = useState(null);
+  const [err, setErr] = useState(null);
+
+  function load() {
+    setErr(null);
+    authed('getCancelledBills', [], 60000)
+      .then(res => {
+        if (res && res.authError) return;
+        if (!res || !res.ok) { setErr((res && res.message) || 'Could not load cancelled bills.'); return; }
+        setBills(res.bills);
+      })
+      .catch(e => setErr(e.message || String(e)));
+  }
+  useEffect(() => { load(); }, []);
+
+  function cancelBill() {
+    const bn = billNo.trim();
+    if (!bn) { Swal.fire({ icon: 'info', title: L('Enter a bill number first', 'Pehle bill number daalo') }); return; }
+    setBusy(true);
+    authed('previewBillCancel', [bn, billType], 60000)
+      .then(res => {
+        setBusy(false);
+        if (res && res.authError) return;
+        if (!res || !res.ok) { Swal.fire({ icon: 'error', title: L('Not found', 'Nahi Mila'), text: fmtDatesInStr((res && res.message) || '') }); return; }
+        const itemList = res.items.slice(0, 10).map(x => '• ' + x).join('<br>') + (res.items.length > 10 ? '<br>… +' + (res.items.length - 10) + ' more' : '');
+        Swal.fire({
+          icon: 'warning',
+          title: L('Cancel bill "' + res.bill_no + '"?', '"' + res.bill_no + '" bill cancel karein?'),
+          html: '<div style="text-align:left;font-size:13px;line-height:1.7">' +
+            L('Type(s): <b>' + res.types.join(', ') + '</b><br>Rows: <b>' + res.rows + '</b> · Qty: <b>' + num(res.qty) + '</b> · Amount: <b>' + inr(res.amount) + '</b><br>Date range: <b>' + fmtDate(res.date_from) + ' → ' + fmtDate(res.date_to) + '</b><br><br>Items:<br>' + itemList + '<br><br>This reverses these transactions out of stock/salesman totals. You can restore it later from this page.',
+               'Type: <b>' + res.types.join(', ') + '</b><br>Rows: <b>' + res.rows + '</b> · Qty: <b>' + num(res.qty) + '</b> · Amount: <b>' + inr(res.amount) + '</b><br>Date range: <b>' + fmtDate(res.date_from) + ' → ' + fmtDate(res.date_to) + '</b><br><br>Items:<br>' + itemList + '<br><br>Ye transactions stock/salesman totals se hat jayengi. Baad mein isi page se restore kar sakte ho.') +
+            '</div>',
+          showCancelButton: true, confirmButtonText: L('Yes, cancel it', 'Haan, Cancel Karo'), confirmButtonColor: '#c62828',
+          cancelButtonText: L('No', 'Nahi'),
+        }).then(r => {
+          if (!r.isConfirmed) return;
+          setBusy(true);
+          authed('cancelBillByNumber', [bn, billType], 60000)
+            .then(res2 => {
+              setBusy(false);
+              if (res2 && res2.authError) return;
+              if (!res2 || !res2.ok) { Swal.fire({ icon: 'error', title: L('Could not cancel', 'Cancel Nahi Hua'), text: (res2 && res2.message) || '' }); return; }
+              Swal.fire({ icon: 'success', title: L('Bill cancelled', 'Bill Cancel Ho Gaya'), text: res2.rows + ' ' + L('row(s) reversed.', 'row(s) reverse ho gayi.') });
+              setBillNo('');
+              load();
+            })
+            .catch(e => { setBusy(false); Swal.fire({ icon: 'error', title: L('Could not cancel', 'Cancel Nahi Hua'), text: e.message || String(e) }); });
+        });
+      })
+      .catch(e => { setBusy(false); Swal.fire({ icon: 'error', title: L('Could not check', 'Check Nahi Ho Paya'), text: e.message || String(e) }); });
+  }
+
+  function restoreBill(b) {
+    Swal.fire({
+      icon: 'warning', title: L('Restore this bill?', 'Ye Bill Restore Karein?'),
+      html: '<div style="text-align:left;font-size:13px;line-height:1.7">' +
+        L('Bill <b>' + b.bill_no + '</b> (' + b.types.join(', ') + ') — ' + b.rows + ' row(s), qty ' + num(b.qty) + ', ' + inr(b.amount) + '.<br>This adds it back into stock/salesman totals.',
+           'Bill <b>' + b.bill_no + '</b> (' + b.types.join(', ') + ') — ' + b.rows + ' row(s), qty ' + num(b.qty) + ', ' + inr(b.amount) + '.<br>Ye wapas stock/salesman totals mein jud jayega.') +
+        '</div>',
+      showCancelButton: true, confirmButtonText: L('Yes, restore', 'Haan, Restore Karo'), cancelButtonText: L('No', 'Nahi'),
+    }).then(r => {
+      if (!r.isConfirmed) return;
+      Swal.fire({ title: L('Restoring…', 'Restore Ho Raha Hai…'), allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+      authed('restoreCancelledBill', [b.cancel_id], 60000)
+        .then(res => {
+          if (res && res.authError) { Swal.close(); return; }
+          if (!res || !res.ok) { Swal.fire({ icon: 'error', title: L('Could not restore', 'Restore Nahi Hua'), text: (res && res.message) || '' }); return; }
+          Swal.fire({ icon: 'success', title: L('Restored', 'Restore Ho Gaya'), text: res.restored + ' ' + L('row(s) added back.', 'row(s) wapas jud gayi.') });
+          load();
+        })
+        .catch(e => Swal.fire({ icon: 'error', title: L('Could not restore', 'Restore Nahi Hua'), text: e.message || String(e) }));
+    });
+  }
+
+  const columns = [
+    { key: 'bill_no', label: L('Bill / Voucher No.', 'Bill / Voucher No.') },
+    { key: 'types', label: L('Type(s)', 'Type'), render: r => r.types.join(', '), exportValue: r => r.types.join(', ') },
+    { key: 'rows', label: L('Rows', 'Rows'), align: 'right', sortValue: r => r.rows, render: r => num(r.rows) },
+    { key: 'qty', label: L('Qty', 'Qty'), align: 'right', sortValue: r => r.qty, render: r => num(r.qty) },
+    { key: 'amount', label: L('Amount', 'Amount'), align: 'right', sortValue: r => r.amount, render: r => inr(r.amount) },
+    { key: 'date_from', label: L('Date Range', 'Date Range'), render: r => (fmtDate(r.date_from) || '—') + ' → ' + (fmtDate(r.date_to) || '—') },
+    { key: 'items', label: L('Items', 'Items'), render: r => r.items.slice(0, 2).join(', ') + (r.items.length > 2 ? ' +' + (r.items.length - 2) + ' more' : ''), exportValue: r => r.items.join(', ') },
+    { key: 'cancelled_by', label: L('Cancelled By', 'Kisne Cancel Kiya') },
+    { key: 'cancelled_at', label: L('Cancelled At', 'Kab Cancel Kiya'), render: r => fmtDateTime(r.cancelled_at) },
+    { key: '_restore', label: L('Action', 'Action'), sortable: false, filterable: false,
+      render: r => <button className="btn-primary" style={{ padding: '5px 12px', fontSize: 12 }} onClick={e => { e.stopPropagation(); restoreBill(r); }}>
+        <i className="fa-solid fa-rotate-left"></i> {L('Restore', 'Restore')}
+      </button> },
+  ];
+
+  return (
+    <>
+      <div className="panel">
+        <h2>{L('Cancel a bill', 'Bill Cancel Karo')} <small>· {L('enter a bill/voucher number to reverse it out of stock and salesman totals', 'stock aur salesman totals se hatane ke liye bill/voucher number daalo')}</small></h2>
+        <div className="filters" style={{ alignItems: 'flex-end' }}>
+          <div>
+            <label>{L('Bill / Voucher No.', 'Bill / Voucher No.')}</label>
+            <input type="text" value={billNo} onChange={e => setBillNo(e.target.value)} placeholder={L('e.g. S-1042', 'jaise S-1042')} style={{ minWidth: 160 }} />
+          </div>
+          <div>
+            <label>{L('Type', 'Type')}</label>
+            <select value={billType} onChange={e => setBillType(e.target.value)}>
+              {BILL_TYPES.map(t => <option key={t.v} value={t.v}>{L(t.en, t.hi)}</option>)}
+            </select>
+          </div>
+          <button className="btn-primary" disabled={busy} onClick={cancelBill}>
+            {busy ? <><i className="fa-solid fa-spinner fa-spin"></i> {L('Checking…', 'Check Ho Raha Hai…')}</> : <><i className="fa-solid fa-ban"></i> {L('Find & Cancel', 'Dhundo & Cancel Karo')}</>}
+          </button>
+        </div>
+        <div className="hint">
+          {L('Only bills whose transactions are still inside the recent detail window (Settings → Transaction detail retention) can be cancelled this way. You will see exactly what will be affected before anything changes.',
+             'Sirf wo bills cancel ho sakte hain jinki transactions abhi bhi haal ke detail window mein hain (Settings → Transaction detail retention). Kuch bhi badalne se pehle exactly kya affect hoga wo dikhaya jayega.')}
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>{L('Cancelled bills', 'Cancel Kiye Hue Bills')} <small>· {L('currently reversed out — restore any of them any time', 'abhi reverse kiye hue — kabhi bhi restore kar sakte ho')}</small></h2>
+        {err && <div className="alert err"><i className="fa-solid fa-circle-exclamation"></i> {err}<button onClick={load}>{L('Retry', 'Dobara Try Karo')}</button></div>}
+        {!err && !bills && <div className="hint">{L('Loading…', 'Load ho raha hai…')}</div>}
+        {!err && bills && bills.length === 0 && (
+          <div><i className="fa-solid fa-circle-check" style={{ color: 'var(--selling)' }}></i>{' '}{L('No cancelled bills.', 'Koi bill cancel nahi hai.')}</div>
+        )}
+        {!err && bills && bills.length > 0 && (
+          <NativeTable columns={columns} rows={bills} pageSize={25}
+            defaultSort={{ key: 'cancelled_at', dir: 'desc' }}
+            emptyText={L('No cancelled bills.', 'Koi bill cancel nahi hai.')} />
+        )}
+      </div>
+    </>
+  );
+}
+
+/* ================= Unmatched ================= */
+
+function UnmatchedView({ rows }) {
+  const { L } = useLang();
+  const columns = [
+    { key: 'type', label: L('Type', 'Type'), render: r => <span className="pill UNKNOWN">{r.type}</span> },
+    { key: 'details', label: L('Item', 'Item'), render: r => r.details || r.item_key },
+    { key: 'detail', label: L('Detail', 'Detail') },
+  ];
+  if (!rows || !rows.length) {
+    return <div className="panel"><i className="fa-solid fa-circle-check" style={{ color: 'var(--selling)' }}></i> {L('Nothing unmatched — every item lines up.', 'Koi gadbad nahi — sab items sahi hain.')}</div>;
+  }
+  return (
+    <div className="panel">
+      <h2>{L('Unmatched & group-mismatch', 'Gadbadi & Group-Mismatch')} <small>· {L('fix in Busy, then re-import', 'Busy mein thik karke dobara import karo')}</small></h2>
+      <NativeTable columns={columns} rows={rows} pageSize={50}
+        defaultSort={{ key: 'type', dir: 'asc' }} emptyText={L('Nothing unmatched.', 'Kuch gadbad nahi mili.')} />
+    </div>
+  );
+}
+
+/* ================= Import Data ================= */
+
+const IMPORT_TYPES = ['Purchase', 'Sales', 'Purchase Return', 'Sales Return', 'Stock'];
+
+function ImportData({ onImported, onAuthError, isAdmin }) {
+  const { L, lang } = useLang();
+  const [type, setType] = useState('Stock');
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [history, setHistory] = useState(null);
+  const lines = text ? text.split('\n').length : 0;
+
+  function loadHistory() {
+    authed('getImportHistory', [], 60000)
+      .then(r => { if (r && r.ok) setHistory(r.imports); })
+      .catch(() => {});
+  }
+  useEffect(() => { loadHistory(); }, []);
+
+  function run(force, asOf) {
+    if (!text.trim()) { Swal.fire({ icon: 'info', title: L('Paste the Busy export first', 'Pehle Busy ka export paste karo') }); return; }
+    if (text.length > 22000000) {
+      Swal.fire({ icon: 'warning', title: L('Paste too large', 'Paste bahut bada hai'),
+        text: L('Export a shorter date range from Busy (a week or fortnight at a time) instead of splitting the same month by rows.',
+                'Busy se chhota date-range nikaalo (ek hafta ya 15 din) — ek hi mahine ko row-wise mat todo.') });
+      return;
+    }
+
+    // Stock import: first ask which date the snapshot represents.
+    if (type === 'Stock' && !asOf) {
+      Swal.fire({
+        title: L('Opening stock — as of which date?', 'Opening Stock — kis date ka hai?'),
+        html: '<div style="text-align:left;font-size:13px;line-height:1.6">' +
+              L('This stock is the closing balance on which date?<br>Transactions dated <b>before</b> this will be skipped (they are already inside the opening balance).<br>Format <b>YYYY-MM-DD</b> (e.g. 2026-06-01).',
+                'Ye stock kis din ka closing balance hai?<br>Us date <b>se pehle</b> ki transactions apne aap skip ho jayengi (wo opening balance mein already shaamil hain).<br>Format <b>YYYY-MM-DD</b> (jaise 2026-06-01).') +
+              '</div>',
+        input: 'text', inputPlaceholder: '2026-06-01',
+        showCancelButton: true, confirmButtonText: L('Continue', 'Aage Badho'), cancelButtonText: L('Cancel', 'Cancel'),
+        preConfirm: v => {
+          const t = String(v || '').trim();
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) { Swal.showValidationMessage(L('Enter the date as YYYY-MM-DD', 'Date YYYY-MM-DD format mein daalo')); return false; }
+          return t;
+        },
+      }).then(r => { if (r.isConfirmed) run(force, r.value); });
+      return;
+    }
+
+    setBusy(true);
+    Swal.fire({ title: L('Processing ' + type + '…', type + ' Process Ho Raha Hai…'),
+      html: L('Parsing rows, detecting the date format, updating the ledger.<br>A large month can take a minute or two.',
+              'Rows parse ho rahi hain, date format check ho raha hai, ledger update ho raha hai.<br>Bada mahina ho to 1-2 minute lag sakte hain.'),
+      allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+
+    const timeout = 350000;
+    authed('importPastedData', [type, text, !!force, asOf || ''], timeout)
+      .then(res => {
+        setBusy(false);
+        if (res && res.authError) { Swal.close(); onAuthError && onAuthError(); return; }
+
+        if (res && res.needsConfirm) {
+          Swal.fire({
+            icon: 'warning', title: L('Opening stock already set', 'Opening Stock Pehle Se Set Hai'),
+            html: '<div style="text-align:left;font-size:13px;line-height:1.7">' + res.message + '</div>',
+            showCancelButton: true, confirmButtonText: L('Yes, reset opening', 'Haan, Opening Reset Karo'), confirmButtonColor: '#c62828',
+            cancelButtonText: L('Cancel', 'Cancel'),
+          }).then(r => { if (r.isConfirmed) run(true, asOf); });
+          return;
+        }
+
+        if (!res || !res.ok) {
+          Swal.fire({
+            icon: res && res.duplicate ? 'warning' : 'error',
+            title: res && res.duplicate ? L('Already imported', 'Pehle Se Import Ho Chuka Hai') : L('Import failed', 'Import Fail Ho Gaya'),
+            text: fmtDatesInStr((res && res.message) || L('Unknown error', 'Anjaan error')),
+            footer: res && res.stack ? '<pre style="text-align:left;font-size:10px;white-space:pre-wrap">' + res.stack + '</pre>' : undefined,
+          });
+          return;
+        }
+
+        const errHtml = (res.errors && res.errors.length)
+          ? '<br><b style="color:#c62828">' + res.errors.length + ' ' + L('error row(s):', 'error rows:') + '</b><br>' +
+            res.errors.slice(0, 12).map(e => '<small>' + e.type + ' — ' + (e.item || '') + '</small>').join('<br>')
+          : '';
+        Swal.fire({
+          icon: 'success', title: res.label + ' ' + L('imported', 'import ho gaya'),
+          html:
+            '<div style="text-align:left;font-size:13px;line-height:1.75">' +
+            L('Rows parsed', 'Rows parse hui') + ': <b>' + res.rowsParsed + '</b><br>' +
+            (res.isStock
+              ? L('Items in table now', 'Table mein ab items') + ': <b>' + res.rowsWritten + '</b><br>' +
+                (res.note ? '<span style="color:var(--muted)">' + fmtDatesInStr(res.note) + '</span><br>' : '')
+              : L('Blank dates filled', 'Khaali dates bhari gayi') + ': <b>' + res.blankDatesFilled + '</b><br>' +
+                L('Date format detected', 'Date format pehchana gaya') + ': <b>' + res.dateFormat + '</b><br>' +
+                L('Date range kept', 'Date range rakha gaya') + ': <b>' + fmtDatesInStr(res.dateRange) + '</b><br>' +
+                (res.skippedBeforeOpening ? '<b style="color:#b26a00">' + L('Skipped (before opening date)', 'Skip hui (opening date se pehle)') + ': ' + res.skippedBeforeOpening + '</b><br>' : '') +
+                L('Ledger rows added', 'Ledger mein rows judi') + ': <b>' + res.rowsAdded + '</b><br>' +
+                L('Old rows pruned (past retention)', 'Purani rows hati (retention se bahar)') + ': <b>' + res.rowsRemoved + '</b><br>') +
+            L('Recent ledger rows (Txn)', 'Haal ki ledger rows (Txn)') + ': <b>' + res.ledgerTotal + '</b><br>' +
+            L('Items total', 'Kul Items') + ': <b>' + res.items + '</b><br>' +
+            L('Unmatched / errors', 'Gadbadi / errors') + ': <b>' + res.unmatchedCount + '</b>' + errHtml +
+            (type === 'Sales Return' ? '<br><br><b style="color:#c62828">' + L('Check the date range shows the right month, not Jan/Feb.', 'Check karo date range sahi mahine ka hai, Jan/Feb nahi.') + '</b>' : '') +
+            '</div>',
+        });
+        setText('');
+        loadHistory();
+        onImported && onImported();
+      })
+      .catch(e => { setBusy(false); Swal.fire({ icon: 'error', title: L('Import failed', 'Import Fail Ho Gaya'), text: e.message || String(e) }); });
+  }
+
+  function undoLast() {
+    Swal.fire({
+      icon: 'warning', title: L('Undo the last import?', 'Aakhri Import Undo Karein?'),
+      text: L('This reverses the most recent Purchase / Sales / Return import and removes its rows. It only works while those rows are still within the retention window.',
+              'Ye sabse aakhri Purchase / Sales / Return import ko wapas palat dega aur uski rows hata dega. Ye sirf tab kaam karega jab tak wo rows retention window mein hain.'),
+      showCancelButton: true, confirmButtonText: L('Undo it', 'Undo Karo'), confirmButtonColor: '#c62828', cancelButtonText: L('Cancel', 'Cancel'),
+    }).then(r => {
+      if (!r.isConfirmed) return;
+      Swal.fire({ title: L('Undoing…', 'Undo Ho Raha Hai…'), allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+      authed('undoLastImport', [], 180000)
+        .then(res => {
+          if (res && res.authError) { Swal.close(); onAuthError && onAuthError(); return; }
+          if (!res || !res.ok) { Swal.fire({ icon: 'error', title: L('Could not undo', 'Undo Nahi Ho Paya'), text: (res && res.message) || '' }); return; }
+          Swal.fire({ icon: 'success', title: L('Undone', 'Undo Ho Gaya'), text: res.type + ' ' + L('import reversed', 'import palat diya gaya') + ' (' + res.rows + ' rows).' });
+          loadHistory();
+          onImported && onImported();
+        })
+        .catch(e => Swal.fire({ icon: 'error', title: L('Could not undo', 'Undo Nahi Ho Paya'), text: e.message || String(e) }));
+    });
+  }
+
+  return (
+    <>
+    <div className="panel import-box">
+      <h2>{L('Import Data', 'Data Daalo')} <small>· {L('paste an export straight from Busy / Excel', 'Busy / Excel se export seedha paste karo')}</small></h2>
+      <div className="row">
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 3, fontWeight: 600 }}>{L('Export type', 'Kis Type Ka Data')}</label>
+          <select value={type} onChange={e => setType(e.target.value)} style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 14 }}>
+            {IMPORT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <button className="btn-primary" onClick={() => run(false)} disabled={busy}>
+          {busy ? <><i className="fa-solid fa-spinner fa-spin"></i> {L('Processing…', 'Chal Raha Hai…')}</> : <><i className="fa-solid fa-gears"></i> {L('Process', 'Chalu Karo')}</>}
+        </button>
+        <span className="hint">{lines > 1 ? lines.toLocaleString('en-IN') + ' ' + L('lines pasted', 'lines paste hui') : ''}</span>
+      </div>
+
+      <textarea value={text} onChange={e => setText(e.target.value)} disabled={busy}
+        placeholder={"Paste the Busy export here.\nCopy the whole thing (including the top lines like “List of … Vouchers” and “From 01-08-2026 to 31-08-2026” — the parser skips them).\nColumns are tab-separated, rows on new lines."} />
+
+      <div className="hint">
+        {lang === 'hi' ? (
+          <>
+            <b>Tareeka:</b> pehle ek baar <b>Stock</b> paste karo — puchega ye balance kis date ka hai. Uske baad us date ya baad ki
+            <b> Purchase</b> / <b>Sales</b> / <b>Return</b> import karo (pehle pichhle mahino ka daal do, phir har hafte). Current stock aise chalta hai:
+            <i> opening + kharid − bikri − purchase return + sale return</i>. Opening date se pehle ki rows apne aap skip ho jaati hain.
+            <br /><b>Safety:</b> jo span ek baar import ho chuka (same type, overlapping dates), wo dobara reject ho jayega — double counting nahi hogi.
+            Galat file paste ho gayi to neeche <b>Undo last import</b> use karo.
+            Dates <i>From … to …</i> line se apne aap detect hoti hain (Sales Return = MM-DD, baaki DD-MM). Pura mahina bhi chalega; sirf bahut zyada bada ho to Busy se chhota date-range nikaalo.
+          </>
+        ) : (
+          <>
+            <b>Order:</b> first paste <b>Stock</b> once — you'll be asked which date that balance is as of. Then import
+            every <b>Purchase</b> / <b>Sales</b> / <b>Return</b> dated on or after that date (back-fill the last few months first,
+            then keep going each week). Current stock is maintained as
+            <i> opening + purchases − sales − purchase&nbsp;return + sale&nbsp;return</i>. Rows dated before the opening date are skipped.
+            <br /><b>Safety:</b> a span you already imported (same type, overlapping dates) is rejected — no double counting.
+            Use <b>Undo last import</b> below if you pasted the wrong file.
+            Dates auto-detected from the <i>From … to …</i> line (Sales Return defaults to MM-DD, the rest DD-MM). A full month is fine; only if it's truly huge, export a shorter date range from Busy.
+          </>
+        )}
+      </div>
+    </div>
+
+    <div className="panel">
+      <h2>{L('Recent imports', 'Pichhle Imports')}
+        <small> · {L('last 15', 'aakhri 15')}</small>
+        {isAdmin && (
+          <button className="logout" style={{ float: 'right' }} onClick={undoLast}>
+            <i className="fa-solid fa-rotate-left"></i> {L('Undo last import', 'Aakhri Import Undo Karo')}
+          </button>
+        )}
+      </h2>
+      {!history && <div className="hint">{L('Loading…', 'Load ho raha hai…')}</div>}
+      {history && history.length === 0 && <div className="hint">{L('No imports yet.', 'Abhi tak koi import nahi.')}</div>}
+      {history && history.length > 0 && (
+        <div className="tbl-scroll">
+          <table className="ntable">
+            <thead><tr><th>{L('When', 'Kab')}</th><th>{L('Type', 'Type')}</th><th>{L('Span', 'Span')}</th><th className="num">{L('Rows', 'Rows')}</th><th>{L('By', 'Kisne')}</th><th>{L('Note', 'Note')}</th></tr></thead>
+            <tbody>
+              {history.map((h, i) => (
+                <tr key={i}>
+                  <td data-label={L('When', 'Kab')}>{fmtDateTime(h.at)}</td>
+                  <td data-label={L('Type', 'Type')}>{h.type}</td>
+                  <td data-label={L('Span', 'Span')}>{h.from ? fmtDate(h.from) + ' → ' + fmtDate(h.to) : '—'}</td>
+                  <td data-label={L('Rows', 'Rows')} className="num">{num(h.rows)}</td>
+                  <td data-label={L('By', 'Kisne')}>{h.by}</td>
+                  <td data-label={L('Note', 'Note')}>{h.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+    </>
+  );
+}
+
+/* ================= Users (admin only — create logins, roles, permissions, reset passwords) ================= */
+
+// Must match the `key`s in Code.gs's PERMISSION_DEFS exactly. Only meaningful for role='staff' —
+// admin always has full access and never uses this list.
+const PERMISSION_DEFS = [
+  { key: 'view_dashboard', en: 'View Dashboard', hi: 'Dashboard Dekho' },
+  { key: 'view_report',    en: 'View Full Report', hi: 'Poori Report Dekho' },
+  { key: 'view_unmatched', en: 'View Unmatched', hi: 'Gadbadi Dekho' },
+  { key: 'import_data',    en: 'Import Data', hi: 'Data Import Karo' },
+  { key: 'cancel_bills',   en: 'Cancel / Restore Bills', hi: 'Bill Cancel / Restore Karo' },
+];
+const DEFAULT_STAFF_PERMS = ['view_dashboard', 'import_data'];
+
+function UsersView() {
+  const { L } = useLang();
+  const [users, setUsers] = useState(null);
+  const [me, setMe] = useState('');
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const [newUsername, setNewUsername] = useState('');
+  const [newDisplayName, setNewDisplayName] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newRole, setNewRole] = useState('staff');
+  const [newPerms, setNewPerms] = useState(DEFAULT_STAFF_PERMS.slice());
+
+  function load() {
+    setErr(null);
+    authed('listUsers', [], 60000)
+      .then(res => {
+        if (res && res.authError) return;
+        if (!res || !res.ok) { setErr((res && res.message) || 'Could not load users.'); return; }
+        setUsers(res.users);
+        setMe(res.you || '');
+      })
+      .catch(e => setErr(e.message || String(e)));
+  }
+  useEffect(() => { load(); }, []);
+
+  function toggleNewPerm(key) {
+    setNewPerms(p => p.indexOf(key) > -1 ? p.filter(x => x !== key) : [...p, key]);
+  }
+
+  function addUser(e) {
+    e.preventDefault();
+    const uname = newUsername.trim();
+    if (!uname || !newPassword) { Swal.fire({ icon: 'info', title: L('Username and password are required', 'Username aur password zaroori hai') }); return; }
+    setBusy(true);
+    authed('createUserFromApp', [uname, newPassword, newRole, newDisplayName.trim(), newPerms], 60000)
+      .then(res => {
+        setBusy(false);
+        if (res && res.authError) return;
+        if (!res || !res.ok) { Swal.fire({ icon: 'error', title: L('Could not save', 'Save Nahi Hua'), text: (res && res.message) || '' }); return; }
+        Swal.fire({ icon: 'success', title: res.updated ? L('User updated', 'User Update Ho Gaya') : L('User created', 'User Ban Gaya') });
+        setNewUsername(''); setNewDisplayName(''); setNewPassword(''); setNewRole('staff'); setNewPerms(DEFAULT_STAFF_PERMS.slice());
+        load();
+      })
+      .catch(e => { setBusy(false); Swal.fire({ icon: 'error', title: L('Could not save', 'Save Nahi Hua'), text: e.message || String(e) }); });
+  }
+
+  function editPermissions(u) {
+    const boxesHtml = PERMISSION_DEFS.map(p =>
+      '<label style="display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px;text-align:left;cursor:pointer">' +
+        '<input type="checkbox" id="perm_' + p.key + '" style="width:15px;height:15px" ' + (u.permissions.indexOf(p.key) > -1 ? 'checked' : '') + '> ' +
+        L(p.en, p.hi) +
+      '</label>'
+    ).join('');
+    Swal.fire({
+      title: L('Permissions for "' + u.username + '"', '"' + u.username + '" ke liye permissions'),
+      html: '<div style="text-align:left">' + boxesHtml + '</div>',
+      showCancelButton: true, confirmButtonText: L('Save', 'Save Karo'), cancelButtonText: L('Cancel', 'Cancel'),
+      preConfirm: () => PERMISSION_DEFS.filter(p => document.getElementById('perm_' + p.key).checked).map(p => p.key),
+    }).then(r => {
+      if (!r.isConfirmed) return;
+      authed('setUserPermissions', [u.username, r.value], 60000)
+        .then(res => {
+          if (res && res.authError) return;
+          if (!res || !res.ok) { Swal.fire({ icon: 'error', title: L('Could not save', 'Save Nahi Hua'), text: (res && res.message) || '' }); return; }
+          load();
+        })
+        .catch(e => Swal.fire({ icon: 'error', title: L('Could not save', 'Save Nahi Hua'), text: e.message || String(e) }));
+    });
+  }
+
+  function changeRole(u, role) {
+    if (role === u.role) return;
+    Swal.fire({
+      icon: 'warning', title: L('Change role?', 'Role Badlein?'),
+      text: L('Make "' + u.username + '" ' + (role === 'admin' ? 'an admin' : 'staff') + '?',
+              '"' + u.username + '" ko ' + role + ' bana dein?'),
+      showCancelButton: true, confirmButtonText: L('Yes', 'Haan'), cancelButtonText: L('No', 'Nahi'),
+    }).then(r => {
+      if (!r.isConfirmed) { load(); return; } // snap the <select> back if cancelled
+      authed('setUserRole', [u.username, role], 60000)
+        .then(res => {
+          if (res && res.authError) return;
+          if (!res || !res.ok) Swal.fire({ icon: 'error', title: L('Could not change role', 'Role Change Nahi Hua'), text: (res && res.message) || '' });
+          load();
+        })
+        .catch(e => { Swal.fire({ icon: 'error', title: L('Could not change role', 'Role Change Nahi Hua'), text: e.message || String(e) }); load(); });
+    });
+  }
+
+  function toggleActive(u) {
+    const goingActive = !u.active;
+    Swal.fire({
+      icon: 'warning', title: goingActive ? L('Activate this user?', 'User Activate Karein?') : L('Deactivate this user?', 'User Deactivate Karein?'),
+      text: u.username, showCancelButton: true, confirmButtonColor: goingActive ? undefined : '#c62828',
+      confirmButtonText: L('Yes', 'Haan'), cancelButtonText: L('No', 'Nahi'),
+    }).then(r => {
+      if (!r.isConfirmed) return;
+      authed('setUserActive', [u.username, goingActive], 60000)
+        .then(res => {
+          if (res && res.authError) return;
+          if (!res || !res.ok) { Swal.fire({ icon: 'error', title: L('Could not change', 'Change Nahi Hua'), text: (res && res.message) || '' }); return; }
+          load();
+        })
+        .catch(e => Swal.fire({ icon: 'error', title: L('Could not change', 'Change Nahi Hua'), text: e.message || String(e) }));
+    });
+  }
+
+  function resetPassword(u) {
+    Swal.fire({
+      title: L('New password for "' + u.username + '"', '"' + u.username + '" ke liye naya password'),
+      input: 'text', inputPlaceholder: L('New password (min 4 characters)', 'Naya password (kam se kam 4 characters)'),
+      showCancelButton: true, confirmButtonText: L('Set password', 'Password Set Karo'), cancelButtonText: L('Cancel', 'Cancel'),
+      preConfirm: v => { if (!v || String(v).length < 4) { Swal.showValidationMessage(L('At least 4 characters', 'Kam se kam 4 characters')); return false; } return v; },
+    }).then(r => {
+      if (!r.isConfirmed) return;
+      authed('adminResetPassword', [u.username, r.value], 60000)
+        .then(res => {
+          if (res && res.authError) return;
+          if (!res || !res.ok) { Swal.fire({ icon: 'error', title: L('Could not reset', 'Reset Nahi Hua'), text: (res && res.message) || '' }); return; }
+          Swal.fire({ icon: 'success', title: L('Password changed', 'Password Badal Gaya'),
+            text: L('They will need to log in again with the new password.', 'Unhe naye password se dobara login karna hoga.') });
+        })
+        .catch(e => Swal.fire({ icon: 'error', title: L('Could not reset', 'Reset Nahi Hua'), text: e.message || String(e) }));
+    });
+  }
+
+  const columns = [
+    { key: 'username', label: L('Username', 'Username') },
+    { key: 'display_name', label: L('Display Name', 'Naam') },
+    { key: 'role', label: L('Role', 'Role'), sortValue: r => r.role,
+      render: r => (
+        <select value={r.role} onChange={e => changeRole(r, e.target.value)}
+          style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12.5 }}>
+          <option value="admin">admin</option>
+          <option value="staff">staff</option>
+        </select>
+      ) },
+    { key: 'active', label: L('Status', 'Status'), sortValue: r => r.active ? 1 : 0,
+      render: r => <span className={'pill ' + (r.active ? 'OK' : 'DEAD')}>{r.active ? L('ACTIVE', 'ACTIVE') : L('DISABLED', 'DISABLED')}</span>,
+      exportValue: r => r.active ? 'ACTIVE' : 'DISABLED' },
+    { key: 'permissions', label: L('Permissions', 'Permissions'), sortable: false,
+      render: r => r.role === 'admin'
+        ? <span className="hint" style={{ margin: 0 }}>{L('all (admin)', 'sab kuch (admin)')}</span>
+        : <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--muted)' }}>
+              {r.permissions.length ? r.permissions.join(', ') : L('none', 'kuch nahi')}
+            </span>
+            <button type="button" className="btn-sm" onClick={e => { e.stopPropagation(); editPermissions(r); }}>
+              <i className="fa-solid fa-pen"></i> {L('Edit', 'Edit')}
+            </button>
+          </div>,
+      exportValue: r => r.role === 'admin' ? 'ALL' : r.permissions.join(', ') },
+    { key: '_actions', label: L('Actions', 'Actions'), sortable: false, filterable: false,
+      render: r => (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button type="button" className="btn-sm" onClick={e => { e.stopPropagation(); resetPassword(r); }}>
+            <i className="fa-solid fa-key"></i> {L('Reset password', 'Password Reset')}
+          </button>
+          {r.username === me
+            ? <span className="hint" style={{ margin: 0 }}>{L('(you)', '(aap)')}</span>
+            : <button type="button" className={r.active ? 'btn-danger-sm' : 'btn-sm'} onClick={e => { e.stopPropagation(); toggleActive(r); }}>
+                <i className={'fa-solid ' + (r.active ? 'fa-user-slash' : 'fa-user-check')}></i>
+                {r.active ? L('Deactivate', 'Deactivate') : L('Activate', 'Activate')}
+              </button>}
+        </div>
+      ) },
+  ];
+
+  return (
+    <>
+      <div className="panel">
+        <h2>{L('Add / update a user', 'User Add / Update Karo')} <small>· {L('create staff logins here — no need for the Apps Script editor', 'yahin se staff ke login banao — Apps Script editor ki zaroorat nahi')}</small></h2>
+        <form onSubmit={addUser}>
+          <div className="form-grid">
+            <div>
+              <label>{L('Username', 'Username')}</label>
+              <input value={newUsername} onChange={e => setNewUsername(e.target.value)} placeholder="staff2" />
+            </div>
+            <div>
+              <label>{L('Display name', 'Naam')}</label>
+              <input value={newDisplayName} onChange={e => setNewDisplayName(e.target.value)} placeholder={L('e.g. Ramesh', 'jaise Ramesh')} />
+            </div>
+            <div>
+              <label>{L('Password', 'Password')}</label>
+              <input type="text" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder={L('min 4 characters', 'kam se kam 4 characters')} />
+            </div>
+            <div>
+              <label>{L('Role', 'Role')}</label>
+              <select value={newRole} onChange={e => setNewRole(e.target.value)} style={{ width: '100%', padding: '10px 12px', borderRadius: 9, border: '1px solid var(--border)', fontSize: 14 }}>
+                <option value="staff">staff</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+          </div>
+          {newRole === 'staff' && (
+            <div style={{ background: '#f6f8fc', border: '1px solid var(--border)', borderRadius: 10, padding: '12px 14px', marginBottom: 16 }}>
+              <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, display: 'block', marginBottom: 8 }}>
+                {L('What can this staff member do?', 'Ye staff member kya kar sakta hai?')}
+              </label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px' }}>
+                {PERMISSION_DEFS.map(p => (
+                  <label key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={newPerms.indexOf(p.key) > -1} onChange={() => toggleNewPerm(p.key)}
+                      style={{ width: 15, height: 15 }} />
+                    {L(p.en, p.hi)}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {busy ? <><i className="fa-solid fa-spinner fa-spin"></i> {L('Saving…', 'Save Ho Raha Hai…')}</> : <><i className="fa-solid fa-user-plus"></i> {L('Save user', 'User Save Karo')}</>}
+          </button>
+        </form>
+        <div className="hint">
+          {L('Typing the SAME username as an existing user updates it (password/role/name/permissions) instead of creating a new one. Admin sees and can do everything; staff only gets the boxes ticked above (change any time from the table below).',
+             'Agar existing username hi dubara type karoge to wo update ho jayega (password/role/naam/permissions) — naya nahi banega. Admin sab kuch dekh/kar sakta hai; staff ko sirf upar tick ki hui cheezein milengi (neeche table se kabhi bhi badal sakte ho).')}
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>{L('All users', 'Sabhi Users')}</h2>
+        {err && <div className="alert err"><i className="fa-solid fa-circle-exclamation"></i> {err}<button onClick={load}>{L('Retry', 'Dobara Try Karo')}</button></div>}
+        {!err && !users && <div className="hint">{L('Loading…', 'Load ho raha hai…')}</div>}
+        {!err && users && (
+          <NativeTable columns={columns} rows={users} pageSize={25}
+            defaultSort={{ key: 'username', dir: 'asc' }}
+            emptyText={L('No users.', 'Koi user nahi.')} />
+        )}
+      </div>
+    </>
+  );
+}
+
+/* ================= Settings (admin only) ================= */
+
+function SettingsView({ onAuthError }) {
+  const { L } = useLang();
+  const [s, setS] = useState(null);
+  const [err, setErr] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    authed('getAppSettings', [], 60000)
+      .then(r => {
+        if (r && r.authError) { onAuthError && onAuthError(); return; }
+        if (r && r.ok) setS(r); else setErr((r && r.message) || 'Could not load settings.');
+      })
+      .catch(e => setErr(e.message || String(e)));
+  }, []);
+
+  if (err) return <div className="panel"><div className="alert err"><i className="fa-solid fa-circle-exclamation"></i> {err}</div></div>;
+  if (!s) return <Loader en="Loading settings…" hi="Settings load ho rahi hain…" />;
+
+  function set(k, v) { setS(p => ({ ...p, [k]: v })); }
+
+  function save() {
+    setBusy(true);
+    authed('saveSettings', [{
+      aging_window_days: s.aging_window_days,
+      dead_stock_min_qty: s.dead_stock_min_qty,
+      sell_through_threshold_pct: s.sell_through_threshold_pct,
+    }], 180000)
+      .then(r => {
+        setBusy(false);
+        if (r && r.authError) { onAuthError && onAuthError(); return; }
+        if (r && r.ok) Swal.fire({ icon: 'success', title: L('Saved', 'Save Ho Gaya') });
+        else Swal.fire({ icon: 'error', title: L('Save failed', 'Save Nahi Hua'), text: (r && r.message) || '' });
+      })
+      .catch(e => { setBusy(false); Swal.fire({ icon: 'error', title: L('Save failed', 'Save Nahi Hua'), text: e.message || String(e) }); });
+  }
+
+  function resetAll() {
+    Swal.fire({
+      icon: 'warning', title: L('Reset ALL data?', 'Sab Data Reset Karein?'),
+      html: '<div style="text-align:left;font-size:13px;line-height:1.7">' +
+            L('This empties <b>Items, Txn, Salesmen, SalesmanBuys, Imports, Unmatched</b> and <b>CancelledBills</b>.<br>Logins and these settings are kept.<br><br>Type <b>RESET</b> to confirm:',
+              'Isse <b>Items, Txn, Salesmen, SalesmanBuys, Imports, Unmatched</b> aur <b>CancelledBills</b> khaali ho jayenge.<br>Logins aur ye settings bachi rahengi.<br><br>Confirm karne ke liye <b>RESET</b> type karo:') +
+            '</div>',
+      input: 'text', inputPlaceholder: 'RESET',
+      showCancelButton: true, confirmButtonText: L('Wipe everything', 'Sab Mitao'), confirmButtonColor: '#c62828', cancelButtonText: L('Cancel', 'Cancel'),
+      preConfirm: v => { if (String(v).trim() !== 'RESET') { Swal.showValidationMessage(L('Type RESET in capitals', 'RESET (capitals mein) type karo')); return false; } return v; },
+    }).then(r => {
+      if (!r.isConfirmed) return;
+      Swal.fire({ title: L('Wiping…', 'Mitaya Ja Raha Hai…'), allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+      authed('resetAllData', ['RESET'], 120000)
+        .then(res => {
+          if (res && res.authError) { Swal.close(); onAuthError && onAuthError(); return; }
+          if (!res || !res.ok) { Swal.fire({ icon: 'error', title: L('Reset failed', 'Reset Nahi Hua'), text: (res && res.message) || '' }); return; }
+          Swal.fire({ icon: 'success', title: L('All data cleared', 'Sab Data Saaf Ho Gaya'), text: L('Paste your opening Stock to start again.', 'Dobara shuru karne ke liye opening Stock paste karo.') });
+        })
+        .catch(e => Swal.fire({ icon: 'error', title: L('Reset failed', 'Reset Nahi Hua'), text: e.message || String(e) }));
+    });
+  }
+
+  return (
+    <>
+    <div className="panel">
+      <h2>{L('Settings', 'Settings')} <small>· {L('thresholds that drive the DEAD / STALE / SLOW status', 'DEAD / STALE / SLOW status ke thresholds')}</small></h2>
+      <div className="form-grid">
+        <div>
+          <label>{L('Aging window (days)', 'Aging Window (Din)')}</label>
+          <input type="number" value={s.aging_window_days} onChange={e => set('aging_window_days', e.target.value)} />
+          <div className="fhint">{L('Days since last purchase before an item can be flagged DEAD.', 'Kharid ke kitne din baad item DEAD flag ho sakta hai.')}</div>
+        </div>
+        <div>
+          <label>{L('Dead-stock min qty', 'Dead Ke Liye Min Qty')}</label>
+          <input type="number" value={s.dead_stock_min_qty} onChange={e => set('dead_stock_min_qty', e.target.value)} />
+          <div className="fhint">{L('Net purchased (lifetime) must be at least this to count as DEAD (ignore tiny lots).', 'DEAD ginne ke liye kul kharid kam se kam itni honi chahiye (chhoti lots ignore).')}</div>
+        </div>
+        <div>
+          <label>{L('Sell-through threshold (%)', 'Sell-through Threshold (%)')}</label>
+          <input type="number" value={s.sell_through_threshold_pct} onChange={e => set('sell_through_threshold_pct', e.target.value)} />
+          <div className="fhint">{L('Below this sell-through %, an item is DEAD / SLOW.', 'Is % se kam sell-through ho to item DEAD / SLOW hai.')}</div>
+        </div>
+      </div>
+      <button className="btn-primary" onClick={save} disabled={busy}>
+        {busy ? <><i className="fa-solid fa-spinner fa-spin"></i> {L('Saving…', 'Save Ho Raha Hai…')}</> : <><i className="fa-solid fa-floppy-disk"></i> {L('Save', 'Save Karo')}</>}
+      </button>
+      <div className="hint">
+        {L('Thresholds apply on the next dashboard load (everything is computed live — no rebuild).',
+           'Thresholds agli dashboard load pe lagu ho jaate hain (sab kuch live compute hota hai — rebuild nahi chahiye).')}{' '}
+        {L('Opening stock is as of', 'Opening stock is date ka hai')} <b>{fmtDate(s.opening_stock_as_of) || L('not set yet', 'abhi set nahi hai')}</b> —{' '}
+        {L('transactions dated before that are skipped on import.', 'us se pehle ki transactions import mein skip ho jaati hain.')}{' '}
+        {L('Transaction detail is kept for', 'Transaction detail rakha jaata hai')} <b>{s.txn_retention_days} {L('days', 'din')}</b>{' '}
+        {L('(the txn_retention_days key in the Settings tab); the aging window can\'t exceed that.',
+           '(Settings tab mein txn_retention_days key) — aging window isse zyada nahi ho sakta.')}
+      </div>
+    </div>
+
+    <div className="panel" style={{ borderLeft: '4px solid var(--dead)' }}>
+      <h2 style={{ color: 'var(--dead)' }}><i className="fa-solid fa-triangle-exclamation"></i> {L('Danger zone', 'Khatarnak Zone')}</h2>
+      <div className="hint" style={{ marginBottom: 12 }}>
+        {L('Start the whole system from zero — clears every item, transaction and salesperson record. Logins stay. There is no undo. You will paste opening Stock again afterwards.',
+           'Poora system zero se shuru karo — har item, transaction aur salesman record mit jayega. Logins bachi rahengi. Isko undo nahi kar sakte. Baad mein opening Stock dobara paste karna padega.')}
+      </div>
+      <button className="logout" style={{ padding: '11px 18px', fontSize: 14 }} onClick={resetAll}>
+        <i className="fa-solid fa-trash"></i> {L('Reset all data', 'Sab Data Reset Karo')}
+      </button>
+    </div>
+    </>
+  );
+}
+
+/* ================= Login ================= */
+
+function Login({ onLogin }) {
+  const { L } = useLang();
+  const [u, setU] = useState('');
+  const [p, setP] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  function submit(e) {
+    e.preventDefault();
+    if (!u || !p) return;
+    setBusy(true);
+    callServer('login', [u, p], 60000)
+      .then(res => {
+        setBusy(false);
+        if (res && res.ok) {
+          onLogin({ token: res.token, role: res.role, display_name: res.display_name, username: res.username, permissions: res.permissions || [] });
+        } else {
+          Swal.fire({ icon: 'error', title: L('Sign in failed', 'Login Nahi Hua'), text: (res && res.message) || L('Wrong username or password.', 'Galat username ya password.') });
+        }
+      })
+      .catch(err => { setBusy(false); Swal.fire({ icon: 'error', title: L('Sign in failed', 'Login Nahi Hua'), text: err.message || String(err) }); });
+  }
+
+  return (
+    <div className="login-wrap">
+      <form className="login-card" onSubmit={submit}>
+        <LangToggle />
+        <div className="logo"><i className="fa-solid fa-shirt"></i></div>
+        <h1>Paris Fashion</h1>
+        <p className="tag">{L('Dead-Stock Tracker — sign in', 'Dead-Stock Tracker — login karo')}</p>
+        <label>{L('Username', 'Username')}</label>
+        <input value={u} onChange={e => setU(e.target.value)} autoFocus autoComplete="username" />
+        <label>{L('Password', 'Password')}</label>
+        <input type="password" value={p} onChange={e => setP(e.target.value)} autoComplete="current-password" />
+        <button type="submit" disabled={busy}>
+          {busy ? <><i className="fa-solid fa-spinner fa-spin"></i> {L('Signing in…', 'Login Ho Raha Hai…')}</> : L('Sign in', 'Login Karo')}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/* ================= Shell (sidebar + topbar + views) ================= */
+
+function Shell({ auth, onLogout }) {
+  const { L } = useLang();
+  const navItems = useMemo(() => NAV.filter(n =>
+    n.roles.indexOf(auth.role) > -1 &&
+    (!n.perm || auth.role === 'admin' || (auth.permissions || []).indexOf(n.perm) > -1)
+  ), [auth.role, auth.permissions]);
+  const [view, setView] = useState('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const [windowDays, setWindowDays] = useState(16);
+  const [reportFilter, setReportFilter] = useState(null);
+
+  // if a view isn't allowed for this role, snap back to Dashboard
+  useEffect(() => { if (navItems.findIndex(n => n.id === view) < 0) setView('dashboard'); }, [view, navItems]);
+
+  function load(w) {
+    setLoading(true); setErr(null);
+    authed('getDashboardData', [w], 240000)
+      .then(d => {
+        if (d && d.authError) { onLogout(); return; }
+        if (!d || d.ok === false) {
+          setErr((d && d.message) ||
+            L('The server returned nothing. This usually means the Stock sheet is very large — press Refresh to retry, or import fewer rows.',
+              'Server se kuch nahi aaya. Aksar iska matlab hai Stock bahut bada hai — Refresh dabao ya kam rows import karo.'));
+          setLoading(false);
+          return;
+        }
+        setData(d); setLoading(false);
+      })
+      .catch(e => { setErr(e.message || String(e)); setLoading(false); });
+  }
+  useEffect(() => { load(windowDays); }, []);
+
+  function changeWindow(v) {
+    if (v === 'custom') {
+      Swal.fire({ title: L('Custom window (days)', 'Apna Window (Din)'), input: 'number', inputValue: windowDays, showCancelButton: true })
+        .then(r => { if (r.isConfirmed && r.value) { const n = parseInt(r.value, 10); setWindowDays(n); load(n); } });
+      return;
+    }
+    const n = parseInt(v, 10); setWindowDays(n); load(n);
+  }
+
+  function go(id) { setReportFilter(null); setView(id); setSidebarOpen(false); }
+
+  /** Used by clickable dashboard cards — jump to a view, pre-filtered (e.g. Full Report -> DEAD only).
+      Full Report unmounts whenever this isn't the active view, so a fresh mount always picks up
+      whatever reportFilter was set right before navigating (see FullReportView's initialFilter). */
+  function goto(id, filter) {
+    setReportFilter(filter || null);
+    setView(id); setSidebarOpen(false);
+  }
+
+  const stdWindow = [30, 16, 10].indexOf(windowDays) > -1;
+  const activeNav = navItems.find(n => n.id === view);
+  const pageTitle = activeNav ? L(activeNav.en, activeNav.hi) : L('Dashboard', 'Dashboard');
+  const needsData = view !== 'import' && view !== 'settings' && view !== 'fullreport' && view !== 'cancelled' && view !== 'users';
+
+  return (
+    <div className="shell">
+      <aside className={'sidebar' + (sidebarOpen ? ' open' : '')}>
+        <div className="brand"><span className="logo"><i className="fa-solid fa-shirt"></i></span> Paris Fashion IMS</div>
+        <nav>
+          {navItems.map(n => (
+            <button key={n.id} className={view === n.id ? 'active' : ''} onClick={() => go(n.id)}>
+              <i className={'fa-solid ' + n.icon}></i> {L(n.en, n.hi)}
+            </button>
+          ))}
+        </nav>
+        <div className="foot">{auth.display_name} · {auth.role}<br />v3 · lean incremental ledger</div>
+      </aside>
+      <div className={'backdrop' + (sidebarOpen ? ' show' : '')} onClick={() => setSidebarOpen(false)}></div>
+
+      <div className="main">
+        <div className="topbar">
+          <button className="hamburger" onClick={() => setSidebarOpen(o => !o)}><i className="fa-solid fa-bars"></i></button>
+          <h2>{pageTitle}</h2>
+          <LangToggle />
+          {needsData && (
+            <select value={stdWindow ? windowDays : 'custom'} onChange={e => changeWindow(e.target.value)} title="Aging window">
+              <option value="30">{L('Last 30 days', 'Pichhle 30 din')}</option>
+              <option value="16">{L('Last 16 days', 'Pichhle 16 din')}</option>
+              <option value="10">{L('Last 10 days', 'Pichhle 10 din')}</option>
+              <option value="custom">{L('Custom…', 'Apna number…')}{stdWindow ? '' : ` (${windowDays})`}</option>
+            </select>
+          )}
+          {needsData && (
+            <button className="icon-btn" onClick={() => load(windowDays)} title="Reload"><i className="fa-solid fa-rotate"></i></button>
+          )}
+          <div className="userchip">
+            <span>{auth.display_name}</span>
+            <span className="role">{auth.role}</span>
+          </div>
+          <button className="logout" onClick={onLogout}><i className="fa-solid fa-arrow-right-from-bracket"></i></button>
+        </div>
+
+        <div className="content">
+          {err && (
+            <div className="alert err">
+              <i className="fa-solid fa-circle-exclamation"></i> {err}
+              <button onClick={() => load(windowDays)}>{L('Retry', 'Dobara Try Karo')}</button>
+            </div>
+          )}
+
+          {view === 'import' && (
+            <ErrorBoundary label="Import Data">
+              <ImportData onImported={() => load(windowDays)} onAuthError={onLogout} isAdmin={auth.role === 'admin'} />
+            </ErrorBoundary>
+          )}
+
+          {view === 'settings' && (
+            <ErrorBoundary label="Settings">
+              <SettingsView onAuthError={onLogout} />
+            </ErrorBoundary>
+          )}
+
+          {view === 'fullreport' && (
+            <ErrorBoundary label="Full Report">
+              <FullReportView initialFilter={reportFilter} />
+            </ErrorBoundary>
+          )}
+
+          {view === 'cancelled' && (
+            <ErrorBoundary label="Cancelled Bills">
+              <CancelledBillsView />
+            </ErrorBoundary>
+          )}
+
+          {view === 'users' && (
+            <ErrorBoundary label="Users">
+              <UsersView />
+            </ErrorBoundary>
+          )}
+
+          {needsData && view !== 'settings' && loading && (
+            <Loader en="Computing…" hi="Hisaab lagaya ja raha hai…" />
+          )}
+
+          {needsData && view !== 'settings' && !loading && data && (
+            <ErrorBoundary label="This view">
+              {view === 'dashboard' && <DashboardHome data={data} goto={goto} role={auth.role} />}
+              {view === 'unmatched' && <UnmatchedView rows={data.unmatched} />}
+            </ErrorBoundary>
+          )}
+
+          {needsData && view !== 'settings' && !loading && !data && !err && (
+            <div className="panel">{L('No data yet. Go to Import Data and paste your Busy exports.', 'Abhi tak koi data nahi. Import Data mein jaake Busy ka export paste karo.')}</div>
+          )}
+        </div>
+
+        <footer>{L('Paris Fashion IMS · dead-stock & salesperson accountability · thresholds in Settings',
+                    'Paris Fashion IMS · dead-stock aur salesman accountability · thresholds Settings mein')}</footer>
+      </div>
+    </div>
+  );
+}
+
+/* ================= App (auth gate) ================= */
+
+function App() {
+  const [auth, setAuth] = useState(_initAuth);
+
+  function onLogin(a) { writeAuth(a); setAuth(a); }
+  function onLogout() {
+    const t = AUTH_TOKEN;
+    writeAuth(null); setAuth(null);
+    if (t) callServer('logout', [t], 20000).catch(() => {});
+  }
+
+  if (!auth || !auth.token) return <Login onLogin={onLogin} />;
+  return <Shell auth={auth} onLogout={onLogout} />;
+}
+
+try {
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <ErrorBoundary label="The app"><LangProvider><App /></LangProvider></ErrorBoundary>
+  );
+} catch (e) {
+  document.getElementById('root').innerHTML =
+    '<div style="padding:24px;color:#c62828;font-family:sans-serif">Failed to start: ' + ((e && e.message) || e) + '</div>';
+}
+</script>
+</body>
+</html>
