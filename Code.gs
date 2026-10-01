@@ -96,7 +96,12 @@ var IMPORT_TARGETS = {
   'SALES':           { txnType: 'SALE',            settingKey: 'date_format_raw_sales',          label: 'Sales',           isStock: false, defaultFmt: 'DD-MM' },
   'PURCHASE RETURN': { txnType: 'PURCHASE_RETURN', settingKey: 'date_format_raw_purchasereturn', label: 'Purchase Return', isStock: false, defaultFmt: 'DD-MM' },
   'SALES RETURN':    { txnType: 'SALE_RETURN',     settingKey: 'date_format_raw_salesreturn',    label: 'Sales Return',    isStock: false, defaultFmt: 'MM-DD' },
-  'STOCK':           { txnType: null,              settingKey: null,                             label: 'Stock',           isStock: true,  defaultFmt: null }
+  'STOCK':           { txnType: null,              settingKey: null,                             label: 'Stock',           isStock: true,  defaultFmt: null },
+  // A "Stock Journal" voucher converts one item into another (e.g. reworking a dead size into a
+  // selling one) — no supplier/salesman involved. The Generated side is treated exactly like a
+  // Purchase (stock added) and the Consumed side exactly like a Sale (stock removed), so dead-stock
+  // aging/status keeps working unmodified — see commitStockJournalImport_.
+  'STOCK JOURNAL':   { txnType: null,              settingKey: 'date_format_raw_stockjournal',   label: 'Stock Journal',   isStock: false, isStockJournal: true, defaultFmt: 'DD-MM' }
 };
 
 var SETTINGS_DEFAULTS = {
@@ -107,7 +112,8 @@ var SETTINGS_DEFAULTS = {
   date_format_raw_purchase:      'AUTO',
   date_format_raw_sales:         'AUTO',
   date_format_raw_purchasereturn:'AUTO',
-  date_format_raw_salesreturn:   'AUTO'
+  date_format_raw_salesreturn:   'AUTO',
+  date_format_raw_stockjournal:  'AUTO'
 };
 
 var KEY_SEP        = ' || ';
@@ -227,6 +233,42 @@ function ensureHeader_(tabName, headers) {
     sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
     sh.setFrozenRows(1);
   }
+}
+
+/** Cheap, targeted self-heal for just the CancelledBills tab — used on the bill-cancel hot path
+    instead of the full setupSheets_() (which touches every tab + Settings + the Users migration
+    on every single call and was the main reason bill search/cancel felt slow). */
+function ensureCancelledSheet_() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(TABS.CANCELLED);
+  if (!sh) sh = ss.insertSheet(TABS.CANCELLED);
+  if (sh.getLastRow() === 0 || String(sh.getRange(1, 1).getValue()).trim() === '') {
+    sh.getRange(1, 1, 1, CANCELLED_HEADERS.length).setValues([CANCELLED_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+}
+
+/** Cheap, targeted self-heal for just the Settings tab — used by saveSettings instead of the full
+    setupSheets_() (same reasoning as ensureCancelledSheet_ above). Seeds any missing default key
+    without touching the other 7 tabs or re-running the Users migration on every save. */
+function ensureSettingsSheet_() {
+  var ss = SpreadsheetApp.getActive();
+  var sh = ss.getSheetByName(TABS.SETTINGS);
+  if (!sh) sh = ss.insertSheet(TABS.SETTINGS);
+  var existing = {};
+  if (sh.getLastRow() > 0) {
+    sh.getRange(1, 1, sh.getLastRow(), 2).getValues().forEach(function (r) {
+      if (r[0] !== '') existing[String(r[0]).trim().toLowerCase()] = true;
+    });
+  } else {
+    sh.getRange(1, 1, 1, 2).setValues([['key', 'value']]).setFontWeight('bold');
+  }
+  var toAdd = [];
+  Object.keys(SETTINGS_DEFAULTS).forEach(function (key) {
+    if (!existing[key]) toAdd.push([key, SETTINGS_DEFAULTS[key]]);
+  });
+  if (toAdd.length) sh.getRange(sh.getLastRow() + 1, 1, toAdd.length, 2).setValues(toAdd);
+  return sh;
 }
 
 /** ensureHeader_ only fills in a BLANK header row — it won't add a column to a Users sheet that
@@ -723,6 +765,89 @@ function writeItemsMap_(map) {
   writeGrid_(TABS.ITEMS, ITEM_HEADERS, rows);
 }
 
+/** Locate one item's row number in the Items sheet WITHOUT reading the whole sheet into memory —
+    TextFinder searches server-side and only returns the match location. Returns -1 if not found. */
+function findItemRowByKey_(sh, keyCol, key) {
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2 || keyCol === -1) return -1;
+  var range = sh.getRange(2, keyCol + 1, lastRow - 1, 1);
+  var finder = range.createTextFinder(String(key)).matchEntireCell(true).useRegularExpression(false);
+  var match = finder.findNext();
+  return match ? match.getRow() : -1;
+}
+
+/**
+ * Read only the given item_keys' rows from Items (not the whole sheet) — a bill cancel/restore
+ * only ever touches a handful of items, so this avoids an O(Items sheet size) read for that.
+ * Returns { map: {key: rec}, rowOf: {key: sheetRowNumber} } (rowOf omits keys not found).
+ */
+function readItemsSubset_(keys) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(TABS.ITEMS);
+  var map = {}, rowOf = {};
+  if (!sh || sh.getLastRow() < 2 || !keys.length) return { map: map, rowOf: rowOf };
+  var header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  var H = buildHeaderMap_(header);
+  var ci = {};
+  Object.keys(ITEM_ALIASES).forEach(function (f) { ci[f] = col_(H, ITEM_ALIASES[f]); });
+  if (ci.item_key === -1) return { map: map, rowOf: rowOf };
+
+  keys.forEach(function (key) {
+    var row = findItemRowByKey_(sh, ci.item_key, key);
+    if (row === -1) return;
+    var vals = sh.getRange(row, 1, 1, header.length).getValues()[0];
+    var g = function (f) { return ci[f] === -1 ? '' : vals[ci[f]]; };
+    map[key] = {
+      item_key: key,
+      details: String(g('details') || '').trim(),
+      group: String(g('group') || '').trim(),
+      opening_stock: parseNum_(g('opening_stock')),
+      purchased: parseNum_(g('purchased')),
+      sold: parseNum_(g('sold')),
+      pur_return: parseNum_(g('pur_return')),
+      sale_return: parseNum_(g('sale_return')),
+      current_stock: parseNum_(g('current_stock')),
+      last_purchase_date: asIsoMaybe_(g('last_purchase_date')),
+      last_sale_date: asIsoMaybe_(g('last_sale_date')),
+      price: parseNum_(g('price')),
+      first_seen: asIsoMaybe_(g('first_seen')),
+      updated_at: asIsoMaybe_(g('updated_at')),
+      first_purchase_date: asIsoMaybe_(g('first_purchase_date')),
+      first_sale_date: asIsoMaybe_(g('first_sale_date')),
+      purchase_entries: parseNum_(g('purchase_entries')),
+      sale_entries: parseNum_(g('sale_entries')),
+      purchase_amount: parseNum_(g('purchase_amount')),
+      sale_amount: parseNum_(g('sale_amount')),
+      suppliers: String(g('suppliers') || '').trim()
+    };
+    rowOf[key] = row;
+  });
+  return { map: map, rowOf: rowOf };
+}
+
+/** Write back just the given keys' Items rows in place (existing row updated, unknown key appended
+    as new) instead of rewriting the whole sheet — used by cancel/restore (readItemsSubset_'s pair). */
+function writeItemsSubset_(items, rowOf, keys) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(TABS.ITEMS);
+  if (!sh) return;
+  var dateCols = textColsFromHeaders_(ITEM_HEADERS);
+  keys.forEach(function (key) {
+    var rec = items[key];
+    if (!rec) return;
+    var rowVals = ITEM_HEADERS.map(function (h) { return rec[h] == null ? '' : rec[h]; });
+    var targetRow = rowOf[key] || (sh.getLastRow() + 1);
+    dateCols.forEach(function (ci) { sh.getRange(targetRow, ci + 1).setNumberFormat('@'); });
+    sh.getRange(targetRow, 1, 1, ITEM_HEADERS.length).setValues([rowVals]);
+    rowOf[key] = targetRow;
+  });
+}
+
+/** Delete a specific set of rows from a sheet without touching any others — far cheaper than
+    reading+rewriting the whole sheet when only a bill's few line items need to go. Rows are
+    deleted highest-number-first so earlier indices in the list stay valid as we go. */
+function deleteSheetRows_(sh, rowNumbers) {
+  rowNumbers.slice().sort(function (a, b) { return b - a; }).forEach(function (r) { sh.deleteRow(r); });
+}
+
 
 /* =============================== IMPORT: WEB APP ENTRY =============================== */
 
@@ -756,9 +881,9 @@ function importPastedData(typeLabel, pastedText, force, asOf, token) {
     }
     if (grid.length < 2) return { ok: false, message: 'Only ' + grid.length + ' line found — nothing to import.' };
 
-    return target.isStock
-      ? applyOpeningStock_(grid, settings, !!force, asOf, auth.user)
-      : commitTxnImport_(grid, target, settings, auth.user);
+    if (target.isStock) return applyOpeningStock_(grid, settings, !!force, asOf, auth.user);
+    if (target.isStockJournal) return commitStockJournalImport_(grid, target, settings, auth.user);
+    return commitTxnImport_(grid, target, settings, auth.user);
 
   } catch (err) {
     return { ok: false, message: (err && err.message) ? err.message : String(err),
@@ -1052,6 +1177,312 @@ function commitTxnImport_(grid, target, settings, user) {
   };
 }
 
+
+/* =============================== STOCK JOURNAL (item conversion) ======================= */
+// A "Stock Journal" voucher converts one item into another (e.g. reworking a dead size into a
+// selling one) — Busy's export has NO Party/Mobile/Salesman column, and repeats "Unit Alt" /
+// "Price" / "Amount" once for the Generated (green) side and once for the Consumed (orange) side:
+//   Date | Vch/Bill No | Item Details | Group | Qty. Generated | Unit Alt | Price | Amount |
+//   Qty. Consumed | Unit Alt | Price | Amount
+// buildHeaderMap_/col_ can't disambiguate a repeated header name (first occurrence wins, by
+// design), so the second Unit/Price/Amount trio is resolved POSITIONALLY — fixed offsets from
+// whichever Qty column anchors that side — then sanity-checked against the header text before
+// being trusted. This is a deliberate, narrow exception to hard rule #1, scoped to this one export
+// shape; every other column is still resolved by name exactly like every other import type.
+// The Generated side is folded into Items exactly like a PURCHASE; the Consumed side exactly like
+// a SALE (see the IMPORT_TARGETS comment) — same fields, so current_stock and every downstream
+// dead-stock calculation need zero changes. The two sides get their own txn_type so they stay
+// traceable and separately overlap-guarded: STOCK_JOURNAL_IN / STOCK_JOURNAL_OUT.
+
+/** Header cell at grid[headerIdx][idx] loosely contains `expect` (e.g. 'price')? Used to sanity-
+    check a positionally-resolved column before trusting it. */
+function headerLooksLike_(headerRow, idx, expect) {
+  if (idx < 0 || idx >= headerRow.length) return false;
+  return String(headerRow[idx] == null ? '' : headerRow[idx]).trim().toLowerCase().indexOf(expect) > -1;
+}
+
+/** Clean a pasted Stock Journal grid. Each row has data on exactly one side (Generated XOR
+    Consumed) — that decides whether the row becomes a STOCK_JOURNAL_IN or STOCK_JOURNAL_OUT row.
+    Output rows are in CLEAN_FIELDS order (party/salesman always '' — no such columns exist here). */
+function cleanStockJournalGrid_(grid, cfg, settings) {
+  var result = { rows: [], errors: [], parsed: 0, blanksFilledDates: 0, detectedFmt: {}, dateRange: null };
+  if (!grid || !grid.length) return result;
+
+  var headerIdx = findHeaderRow_(grid);
+  if (headerIdx === -1) {
+    result.errors.push(['HEADER_NOT_FOUND', '', '', 'No row containing "Item Details" — nothing imported', 'STOCK_JOURNAL']);
+    return result;
+  }
+
+  var preText = grid.slice(0, headerIdx).map(function (r) { return r.join(' '); }).join(' ');
+  var range = extractDateRange_(preText) || extractDateRange_(grid.map(function (r) { return r.join(' '); }).join(' '));
+  result.dateRange = range;
+
+  var cfgFmt = String(settings[cfg.settingKey] || 'AUTO').toUpperCase();
+  var effectiveFmt = (cfgFmt === 'AUTO' && !range && cfg.defaultFmt) ? cfg.defaultFmt : cfgFmt;
+
+  var headerRow = grid[headerIdx];
+  var H = buildHeaderMap_(headerRow);
+  var c = {
+    date:  col_(H, ['date']),
+    vch:   col_(H, ['vch/bill no', 'vch no', 'voucher no', 'bill no', 'vch/bill']),
+    group: col_(H, ['group', 'item group']),
+    item:  col_(H, ['item details', 'item name', 'item']),
+    gen:   col_(H, ['qty. generated', 'qty generated']),
+    con:   col_(H, ['qty. consumed', 'qty consumed'])
+  };
+  if (c.item === -1 || c.gen === -1 || c.con === -1) {
+    result.errors.push(['COLUMNS_MISSING', '', '',
+      'Could not map Item Details / Qty. Generated / Qty. Consumed. Headers seen: ' + Object.keys(H).join(', '), 'STOCK_JOURNAL']);
+    return result;
+  }
+
+  var genUnit = c.gen + 1, genPrice = c.gen + 2, genAmt = c.gen + 3;
+  var conUnit = c.con + 1, conPrice = c.con + 2, conAmt = c.con + 3;
+  var offsetsOk =
+    headerLooksLike_(headerRow, genUnit, 'unit') && headerLooksLike_(headerRow, genPrice, 'price') && headerLooksLike_(headerRow, genAmt, 'amount') &&
+    headerLooksLike_(headerRow, conUnit, 'unit') && headerLooksLike_(headerRow, conPrice, 'price') && headerLooksLike_(headerRow, conAmt, 'amount');
+  if (!offsetsOk) {
+    result.errors.push(['COLUMNS_MISSING', '', '',
+      'Qty. Generated/Consumed were found but the Unit/Price/Amount columns right after them don\'t look right — export layout may have changed. Headers seen: ' + headerRow.join(' | '), 'STOCK_JOURNAL']);
+    return result;
+  }
+
+  var carry = { date: '', vch: '', group: '' };
+  var get = function (row, idx) { return idx === -1 || idx >= row.length ? '' : row[idx]; };
+
+  for (var r = headerIdx + 1; r < grid.length; r++) {
+    var row = grid[r];
+    if (row.join('').trim() === '') continue;
+
+    var firstNonEmpty = row.find(function (x) { return String(x).trim() !== ''; });
+    if (/^(grand\s+)?total\b/i.test(String(firstNonEmpty || ''))) continue;
+    if (String(get(row, c.item)).trim().toLowerCase().replace(/\s+/g, ' ') === 'item details') continue;
+
+    ['date', 'vch', 'group'].forEach(function (f) {
+      var idx = c[f];
+      if (idx === -1) return;
+      var cell = row[idx];
+      if (cell == null || String(cell).trim() === '') row[idx] = carry[f];
+      else carry[f] = cell;
+    });
+
+    var itemRaw = String(get(row, c.item)).trim();
+    var genQty = parseNum_(get(row, c.gen));
+    var conQty = parseNum_(get(row, c.con));
+    if (itemRaw === '' && genQty === 0 && conQty === 0) continue;
+
+    if (genQty !== 0 && conQty !== 0) {
+      result.errors.push(['STOCK_JOURNAL_BOTH_SIDES', makeItemKey_(itemRaw, get(row, c.group)), itemRaw,
+        'Row has both Qty. Generated and Qty. Consumed — expected only one side per row, skipped', 'STOCK_JOURNAL']);
+      continue;
+    }
+    if (genQty === 0 && conQty === 0) continue;
+
+    var isGen = genQty !== 0;
+    var qty = isGen ? genQty : conQty;
+    var unitIdx = isGen ? genUnit : conUnit, priceIdx = isGen ? genPrice : conPrice, amtIdx = isGen ? genAmt : conAmt;
+    var txnType = isGen ? 'STOCK_JOURNAL_IN' : 'STOCK_JOURNAL_OUT';
+
+    var dRes = detectDate_(row[c.date], effectiveFmt, range, cfg.defaultFmt);
+    if (row[c.date] == null || String(row[c.date]).trim() === '') result.blanksFilledDates++;
+    if (dRes.err || !dRes.iso) {
+      result.errors.push(['BAD_DATE:' + (dRes.err || 'UNKNOWN'),
+        makeItemKey_(itemRaw, get(row, c.group)), itemRaw,
+        'raw="' + row[c.date] + '"  vch=' + get(row, c.vch), 'STOCK_JOURNAL']);
+      continue;
+    }
+    result.detectedFmt[dRes.fmt] = (result.detectedFmt[dRes.fmt] || 0) + 1;
+
+    var groupRaw = String(get(row, c.group)).trim();
+    result.rows.push([
+      txnType,
+      dRes.iso,
+      String(get(row, c.vch)).trim(),
+      '',   // party — no such column in a Stock Journal export
+      '',   // salesman — no such column in a Stock Journal export
+      itemRaw,
+      makeItemKey_(itemRaw, groupRaw),
+      groupRaw,
+      qty,
+      String(get(row, unitIdx)).trim(),
+      parseNum_(get(row, priceIdx)),
+      parseNum_(get(row, amtIdx))
+    ]);
+    result.parsed++;
+  }
+  return result;
+}
+
+/**
+ * Clean the paste, split rows into Generated (→ folded in like PURCHASE) / Consumed (→ folded in
+ * like SALE) batches, block overlaps per side, then atomically fold both into Items / Salesmen /
+ * SalesmanBuys, append to Txn under ONE shared import_id, prune old Txn, and log one Imports row
+ * per non-empty side (same import_id) so undoLastImport reverses both sides as one atomic action.
+ */
+function commitStockJournalImport_(grid, target, settings, user) {
+  var cfg = { settingKey: target.settingKey, defaultFmt: target.defaultFmt };
+  var cleaned = cleanStockJournalGrid_(grid, cfg, settings);
+
+  if (!cleaned.rows.length) {
+    persistUnmatched_('STOCK_JOURNAL', cleaned.errors);
+    return {
+      ok: false,
+      message: 'No usable rows parsed from this Stock Journal paste.' +
+        (cleaned.errors.length ? ' ' + cleaned.errors.length + ' error row(s) — see Unmatched.' : '')
+    };
+  }
+
+  // Drop rows dated before the opening-stock snapshot — same guard commitTxnImport_ uses.
+  var asOf = getOpeningAsOf_();
+  var skippedBefore = 0;
+  if (asOf) {
+    var kept = [];
+    cleaned.rows.forEach(function (r) {
+      if (r[1] < asOf) {
+        skippedBefore++;
+        cleaned.errors.push(['BEFORE_OPENING', r[6], r[5],
+          'date ' + r[1] + ' is before the opening-stock date ' + asOf + ' — skipped (would double-count stock)', 'STOCK_JOURNAL']);
+      } else kept.push(r);
+    });
+    cleaned.rows = kept;
+  }
+  if (!cleaned.rows.length) {
+    persistUnmatched_('STOCK_JOURNAL', cleaned.errors);
+    return { ok: false, message: 'Every row in this Stock Journal paste is dated before the opening-stock date (' +
+      asOf + '). Nothing imported. Export a range that starts on or after ' + asOf + '.' };
+  }
+
+  var genRows = cleaned.rows.filter(function (r) { return r[0] === 'STOCK_JOURNAL_IN'; });
+  var conRows = cleaned.rows.filter(function (r) { return r[0] === 'STOCK_JOURNAL_OUT'; });
+
+  function spanOf(rows) {
+    var dates = rows.map(function (r) { return r[1]; }).sort();
+    return { from: dates[0], to: dates[dates.length - 1] };
+  }
+  var genSpan = genRows.length ? spanOf(genRows) : null;
+  var conSpan = conRows.length ? spanOf(conRows) : null;
+
+  var clash = (genSpan && checkOverlap_('STOCK_JOURNAL_IN', genSpan.from, genSpan.to)) ||
+              (conSpan && checkOverlap_('STOCK_JOURNAL_OUT', conSpan.from, conSpan.to));
+  if (clash) {
+    return {
+      ok: false, duplicate: true,
+      message: 'Stock Journal overlaps an import already done on ' + clash.at +
+        ' (span ' + clash.from + ' → ' + clash.to + '). Re-importing would double-count. ' +
+        'Use "Undo last import" first, or export a non-overlapping span.'
+    };
+  }
+
+  var importId = newImportId_();
+
+  // ---- aggregate the batch in memory (mirrors commitTxnImport_'s PURCHASE/SALE branches) ----
+  var itemDelta = {}, smDelta = {}, buyDelta = {};
+  var genQtyTotal = 0, genAmtTotal = 0, conQtyTotal = 0, conAmtTotal = 0;
+
+  cleaned.rows.forEach(function (row) {
+    var type = row[0], dIso = row[1], sm = String(row[4]).trim() || '(blank)';
+    var itemRaw = row[5], key = row[6], grp = row[7];
+    var qty = parseNum_(row[8]), price = parseNum_(row[10]), amt = parseNum_(row[11]);
+
+    var d = itemDelta[key] || (itemDelta[key] = {
+      dP: 0, dS: 0, lastPur: '', lastSale: '', firstPur: '', firstSale: '',
+      purPrice: 0, dPurAmt: 0, dSaleAmt: 0, purEntries: 0, saleEntries: 0, details: itemRaw, group: grp
+    });
+    if (!d.details && itemRaw) d.details = itemRaw;
+    if (!d.group && grp) d.group = grp;
+
+    if (type === 'STOCK_JOURNAL_IN') {
+      genQtyTotal += qty; genAmtTotal += amt;
+      d.dP += qty; if (dIso > d.lastPur) d.lastPur = dIso; if (!d.firstPur || dIso < d.firstPur) d.firstPur = dIso;
+      if (price) d.purPrice = price;
+      d.dPurAmt += amt; d.purEntries++;
+      var s1 = smDelta[sm] || (smDelta[sm] = { soldQ: 0, soldA: 0, boughtQ: 0, boughtA: 0 });
+      s1.boughtQ += qty; s1.boughtA += amt;
+      var bk = sm + KEY_SEP + key;
+      var b = buyDelta[bk] || (buyDelta[bk] = { salesman: sm, item_key: key, qty: 0, amount: 0, last_date: '', details: itemRaw, group: grp });
+      b.qty += qty; b.amount += amt; if (dIso > b.last_date) b.last_date = dIso;
+    } else {
+      conQtyTotal += qty; conAmtTotal += amt;
+      d.dS += qty; if (dIso > d.lastSale) d.lastSale = dIso; if (!d.firstSale || dIso < d.firstSale) d.firstSale = dIso;
+      d.dSaleAmt += amt; d.saleEntries++;
+      var s2 = smDelta[sm] || (smDelta[sm] = { soldQ: 0, soldA: 0, boughtQ: 0, boughtA: 0 });
+      s2.soldQ += qty; s2.soldA += amt;
+    }
+  });
+
+  // ---- apply to Items (purchased/sold only — no return concept for a stock conversion) ----
+  var items = readItemsMap_();
+  Object.keys(itemDelta).forEach(function (key) {
+    var d = itemDelta[key];
+    var rec = items[key] || (items[key] = newItemRec_(key, d.details, d.group));
+    rec.purchased   = round2_(rec.purchased + d.dP);
+    rec.sold        = round2_(rec.sold + d.dS);
+    rec.purchase_amount = round2_(rec.purchase_amount + d.dPurAmt);
+    rec.sale_amount     = round2_(rec.sale_amount + d.dSaleAmt);
+    rec.purchase_entries = (rec.purchase_entries || 0) + d.purEntries;
+    rec.sale_entries      = (rec.sale_entries || 0) + d.saleEntries;
+    if (d.lastPur && d.lastPur > rec.last_purchase_date)  rec.last_purchase_date = d.lastPur;
+    if (d.lastSale && d.lastSale > rec.last_sale_date)    rec.last_sale_date = d.lastSale;
+    if (d.firstPur && (!rec.first_purchase_date || d.firstPur < rec.first_purchase_date)) rec.first_purchase_date = d.firstPur;
+    if (d.firstSale && (!rec.first_sale_date || d.firstSale < rec.first_sale_date))       rec.first_sale_date = d.firstSale;
+    if (d.purPrice) rec.price = d.purPrice;
+    if (!rec.details && d.details) rec.details = d.details;
+    if (!rec.group && d.group) rec.group = d.group;
+    rec.updated_at = nowStamp_();
+    recalcStock_(rec);
+  });
+  writeItemsMap_(items);
+
+  applySalesmenDelta_(smDelta);
+  applyBuysDelta_(buyDelta);
+
+  // ---- append to Txn (both sides, one shared import_id), then prune ----
+  var txnRows = cleaned.rows.map(function (r) { return [importId].concat(r); });
+  appendRows_(TABS.TXN, txnRows);
+  var pruned = pruneTxn_(settings);
+
+  // ---- log: one Imports row per non-empty side, SAME import_id — undoLastImport reverses both ----
+  var importRows = [];
+  if (genSpan) importRows.push([
+    importId, 'STOCK_JOURNAL_IN', genSpan.from, genSpan.to, genRows.length,
+    round2_(genQtyTotal), round2_(genAmtTotal), user.username, nowStamp_(),
+    'Stock Journal — Generated side (voucher conversion, folded in like a Purchase)'
+  ]);
+  if (conSpan) importRows.push([
+    importId, 'STOCK_JOURNAL_OUT', conSpan.from, conSpan.to, conRows.length,
+    round2_(conQtyTotal), round2_(conAmtTotal), user.username, nowStamp_(),
+    'Stock Journal — Consumed side (voucher conversion, folded in like a Sale)'
+  ]);
+  appendRows_(TABS.IMPORTS, importRows);
+
+  persistUnmatched_('STOCK_JOURNAL', cleaned.errors);
+
+  var spans = [genSpan, conSpan].filter(Boolean);
+  var overallFrom = spans.map(function (s) { return s.from; }).sort()[0];
+  var overallTo = spans.map(function (s) { return s.to; }).sort().slice(-1)[0];
+
+  return {
+    ok: true, isStock: false, isStockJournal: true, label: 'Stock Journal', importId: importId,
+    rowsParsed: cleaned.rows.length,
+    blankDatesFilled: cleaned.blanksFilledDates,
+    skippedBeforeOpening: skippedBefore,
+    dateFormat: topKey_(cleaned.detectedFmt) || 'n/a',
+    dateRange: overallFrom + ' → ' + overallTo,
+    generated: { rows: genRows.length, qty: round2_(genQtyTotal), amount: round2_(genAmtTotal),
+                 dateRange: genSpan ? (genSpan.from + ' → ' + genSpan.to) : '—' },
+    consumed: { rows: conRows.length, qty: round2_(conQtyTotal), amount: round2_(conAmtTotal),
+                dateRange: conSpan ? (conSpan.from + ' → ' + conSpan.to) : '—' },
+    rowsAdded: cleaned.rows.length,
+    rowsRemoved: pruned,
+    ledgerTotal: countRows_(TABS.TXN),
+    items: Object.keys(items).length,
+    unmatchedCount: cleaned.errors.length,
+    errors: cleaned.errors.slice(0, 50).map(function (e) { return { type: e[0], item: e[2] || e[1], detail: e[3] }; })
+  };
+}
+
+
 function applySalesmenDelta_(smDelta) {
   if (!Object.keys(smDelta).length) return;
   var map = {};
@@ -1195,21 +1626,24 @@ function undoLastImport(token) {
     return { ok: false, message: 'That import (' + impId + ') is already pruned from Txn and cannot be auto-undone. Use RESET and re-import if the data is wrong.' };
   }
 
-  // Reverse the same aggregation.
+  // Reverse the same aggregation. STOCK_JOURNAL_IN/_OUT fold in exactly like PURCHASE/SALE (see
+  // commitStockJournalImport_) — widened here with an OR so they reverse the same way.
   var itemDelta = {}, smDelta = {}, buyDelta = {};
+  var typesUndone = {};
   mine.forEach(function (row) {
     var type = String(row[tc.type]).trim().toUpperCase();
+    typesUndone[type] = true;
     var sm = String(row[tc.sm]).trim() || '(blank)';
     var key = String(row[tc.key]).trim();
     var qty = parseNum_(row[tc.qty]), amt = parseNum_(row[tc.amount]);
     var d = itemDelta[key] || (itemDelta[key] = { dP: 0, dS: 0, dPR: 0, dSR: 0, dPurAmt: 0, dSaleAmt: 0, purEntries: 0, saleEntries: 0 });
     var s = smDelta[sm] || (smDelta[sm] = { soldQ: 0, soldA: 0, boughtQ: 0, boughtA: 0 });
-    if (type === 'PURCHASE') {
+    if (type === 'PURCHASE' || type === 'STOCK_JOURNAL_IN') {
       d.dP -= qty; d.dPurAmt -= amt; d.purEntries -= 1; s.boughtQ -= qty; s.boughtA -= amt;
       var bk = sm + KEY_SEP + key;
       var b = buyDelta[bk] || (buyDelta[bk] = { salesman: sm, item_key: key, qty: 0, amount: 0, last_date: '', details: '', group: '' });
       b.qty -= qty; b.amount -= amt;
-    } else if (type === 'SALE') {
+    } else if (type === 'SALE' || type === 'STOCK_JOURNAL_OUT') {
       d.dS -= qty; d.dSaleAmt -= amt; d.saleEntries -= 1; s.soldQ -= qty; s.soldA -= amt;
     } else if (type === 'PURCHASE_RETURN') {
       d.dPR -= qty; s.boughtQ += qty; s.boughtA += amt;
@@ -1246,8 +1680,8 @@ function undoLastImport(token) {
     var type = String(row[tc.type]).trim().toUpperCase();
     var dIso = asIsoMaybe_(row[tc.date]);
     var e = remainByKey[key] || (remainByKey[key] = { pur: '', sale: '' });
-    if (type === 'PURCHASE' && dIso > e.pur) e.pur = dIso;
-    if (type === 'SALE' && dIso > e.sale) e.sale = dIso;
+    if ((type === 'PURCHASE' || type === 'STOCK_JOURNAL_IN') && dIso > e.pur) e.pur = dIso;
+    if ((type === 'SALE' || type === 'STOCK_JOURNAL_OUT') && dIso > e.sale) e.sale = dIso;
   });
   Object.keys(itemDelta).forEach(function (key) {
     var rec = items[key];
@@ -1261,11 +1695,24 @@ function undoLastImport(token) {
   applySalesmenDelta_(smDelta);
   applyBuysDelta_(buyDelta);
 
-  // Delete the Txn rows and the Imports row.
+  // Delete the Txn rows, then every Imports row sharing this import_id whose type was actually
+  // reversed above. Normally that's just `last` (one row), but a Stock Journal paste logs TWO
+  // Imports rows (IN + OUT) under one import_id — delete both here, bottom-up so row numbers
+  // don't shift mid-delete. If one side's Txn rows were already pruned past retention, only the
+  // surviving side's Imports row gets deleted (the guard above already refused the undo outright
+  // if BOTH sides were gone).
   writeGrid_(TABS.TXN, TXN_HEADERS, keep);
-  impSh.deleteRow(lastRowNo + 1);
+  var rowsToDelete = [];
+  for (var ri = 1; ri < iv.length; ri++) {
+    if (String(iv[ri][ic.id]).trim() !== impId) continue;
+    if (!typesUndone[String(iv[ri][ic.type]).trim().toUpperCase()]) continue;
+    rowsToDelete.push(ri + 1);
+  }
+  rowsToDelete.sort(function (a, b) { return b - a; }).forEach(function (rowNo) { impSh.deleteRow(rowNo); });
 
-  return { ok: true, undone: impId, type: impType, rows: mine.length };
+  var undoneTypes = Object.keys(typesUndone);
+  var reportType = undoneTypes.length > 1 ? 'STOCK_JOURNAL' : (undoneTypes[0] || impType);
+  return { ok: true, undone: impId, type: reportType, rows: mine.length };
 }
 
 
@@ -1276,15 +1723,25 @@ function undoLastImport(token) {
 // the removed rows into CancelledBills so they can be restored later. Only reaches bills whose rows
 // are still inside the Txn retention window (same limitation as undoLastImport).
 
-/** Find every Txn row matching a bill/voucher number (optionally scoped to one txn_type). */
-function findTxnRowsByBill_(billNo, txnType) {
+/** A physical bill = same vch_no + same type + same date + same party + same salesman (its item
+    lines share all of these). Two DIFFERENT bills can share a vch_no (numbering reset, coincidence,
+    typo) — this key is what tells them apart so a cancel never sweeps up more than one bill. */
+function billGroupKey_(row, tc) {
+  return [String(row[tc.type]).trim().toUpperCase(), row[tc.date],
+          String(row[tc.party] || '').trim().toLowerCase(), String(row[tc.sm] || '').trim().toLowerCase()].join('||');
+}
+
+/** Find every Txn row matching a bill/voucher number (optionally scoped to one txn_type, and to
+    one specific bill instance via groupKey — see billGroupKey_ — when the number is shared). */
+function findTxnRowsByBill_(billNo, txnType, groupKey) {
   var bill = String(billNo || '').trim().toLowerCase();
   var typeFilter = String(txnType || '').trim().toUpperCase();
-  var out = { ok: true, matched: [], kept: [], tc: null };
+  var out = { ok: true, matched: [], matchedRows: [], kept: [], tc: null, sh: null };
   if (!bill) { out.ok = false; out.message = 'Enter a bill/voucher number.'; return out; }
 
   var sh = SpreadsheetApp.getActive().getSheetByName(TABS.TXN);
   if (!sh || sh.getLastRow() < 2) { out.ok = false; out.message = 'Txn is empty — nothing to cancel.'; return out; }
+  out.sh = sh;
   var tv = sh.getDataRange().getValues();
   var TH = buildHeaderMap_(tv[0]);
   var tc = { imp: col_(TH, ['import_id']), type: col_(TH, ['txn_type']), date: col_(TH, ['date']),
@@ -1299,7 +1756,8 @@ function findTxnRowsByBill_(billNo, txnType) {
     var rowVch = String(tv[i][tc.vch] == null ? '' : tv[i][tc.vch]).trim().toLowerCase();
     var rowType = String(tv[i][tc.type]).trim().toUpperCase();
     var isMatch = rowVch === bill && (!typeFilter || typeFilter === 'ALL' || rowType === typeFilter);
-    if (isMatch) out.matched.push(tv[i]); else out.kept.push(tv[i]);
+    if (isMatch && groupKey) isMatch = billGroupKey_(tv[i], tc) === groupKey;
+    if (isMatch) { out.matched.push(tv[i]); out.matchedRows.push(i + 1); } else out.kept.push(tv[i]);
   }
   if (!out.matched.length) {
     out.ok = false;
@@ -1310,42 +1768,49 @@ function findTxnRowsByBill_(billNo, txnType) {
   return out;
 }
 
-/** Summarise what cancelling a bill number would affect, WITHOUT changing anything — for a confirm step. */
+/**
+ * List every DISTINCT physical bill matching a bill/voucher number, WITHOUT changing anything.
+ * The same number can belong to more than one real bill (numbering reset, different party, a
+ * typo) — this returns one entry per actual bill (see billGroupKey_) so the caller can show the
+ * admin exactly what's there and let them pick the right one to cancel, instead of guessing.
+ */
 function previewBillCancel(billNo, txnType, token) {
   var auth = checkAuth_(token, ['admin', 'staff'], 'cancel_bills');
   if (auth._err) return auth._err;
-  setupSheets_(); // self-heal: makes sure the CancelledBills tab exists on sheets set up before this feature
+  ensureCancelledSheet_(); // self-heal: makes sure the CancelledBills tab exists
 
-  var found = findTxnRowsByBill_(billNo, txnType);
+  var found = findTxnRowsByBill_(billNo, txnType, null);
   if (!found.ok) return { ok: false, message: found.message };
   var tc = found.tc;
 
-  var types = {}, items = {}, qty = 0, amount = 0, minDate = '', maxDate = '';
+  var groupsByKey = {};
   found.matched.forEach(function (row) {
-    types[String(row[tc.type]).trim().toUpperCase()] = true;
-    var key = String(row[tc.key]).trim();
-    items[key] = String(row[tc.raw]).trim() || key;
-    qty += parseNum_(row[tc.qty]);
-    amount += parseNum_(row[tc.amount]);
-    var d = row[tc.date];
-    if (!minDate || d < minDate) minDate = d;
-    if (!maxDate || d > maxDate) maxDate = d;
+    var gk = billGroupKey_(row, tc);
+    var g = groupsByKey[gk] || (groupsByKey[gk] = {
+      group_key: gk, type: String(row[tc.type]).trim().toUpperCase(), date: row[tc.date],
+      party: String(row[tc.party] || '').trim(), salesman: String(row[tc.sm] || '').trim(),
+      items: [], rows: 0, qty: 0, amount: 0
+    });
+    g.items.push(String(row[tc.raw]).trim() || String(row[tc.key]).trim());
+    g.rows++;
+    g.qty = round2_(g.qty + parseNum_(row[tc.qty]));
+    g.amount = round2_(g.amount + parseNum_(row[tc.amount]));
   });
 
-  return {
-    ok: true, bill_no: String(billNo).trim(), rows: found.matched.length,
-    types: Object.keys(types), items: Object.keys(items).map(function (k) { return items[k]; }),
-    qty: round2_(qty), amount: round2_(amount), date_from: minDate, date_to: maxDate
-  };
+  var groups = Object.keys(groupsByKey).map(function (k) { return groupsByKey[k]; })
+    .sort(function (a, b) { return a.date < b.date ? 1 : (a.date > b.date ? -1 : 0); });
+
+  return { ok: true, bill_no: String(billNo).trim(), groups: groups };
 }
 
-/** Actually cancel a bill number: reverse its effect and archive the rows for restore. Admin only. */
-function cancelBillByNumber(billNo, txnType, token) {
+/** Actually cancel ONE specific bill instance (identified by group_key from previewBillCancel):
+    reverse its effect and archive the rows for restore. */
+function cancelBillByNumber(billNo, txnType, groupKey, token) {
   var auth = checkAuth_(token, ['admin', 'staff'], 'cancel_bills');
   if (auth._err) return auth._err;
-  setupSheets_();
+  ensureCancelledSheet_();
 
-  var found = findTxnRowsByBill_(billNo, txnType);
+  var found = findTxnRowsByBill_(billNo, txnType, groupKey || null);
   if (!found.ok) return { ok: false, message: found.message };
   var tc = found.tc;
 
@@ -1358,12 +1823,12 @@ function cancelBillByNumber(billNo, txnType, token) {
     var qty = parseNum_(row[tc.qty]), amt = parseNum_(row[tc.amount]);
     var d = itemDelta[key] || (itemDelta[key] = { dP: 0, dS: 0, dPR: 0, dSR: 0, dPurAmt: 0, dSaleAmt: 0, purEntries: 0, saleEntries: 0 });
     var s = smDelta[sm] || (smDelta[sm] = { soldQ: 0, soldA: 0, boughtQ: 0, boughtA: 0 });
-    if (type === 'PURCHASE') {
+    if (type === 'PURCHASE' || type === 'STOCK_JOURNAL_IN') {
       d.dP -= qty; d.dPurAmt -= amt; d.purEntries -= 1; s.boughtQ -= qty; s.boughtA -= amt;
       var bk = sm + KEY_SEP + key;
       var b = buyDelta[bk] || (buyDelta[bk] = { salesman: sm, item_key: key, qty: 0, amount: 0, last_date: '', details: '', group: '' });
       b.qty -= qty; b.amount -= amt;
-    } else if (type === 'SALE') {
+    } else if (type === 'SALE' || type === 'STOCK_JOURNAL_OUT') {
       d.dS -= qty; d.dSaleAmt -= amt; d.saleEntries -= 1; s.soldQ -= qty; s.soldA -= amt;
     } else if (type === 'PURCHASE_RETURN') {
       d.dPR -= qty; s.boughtQ += qty; s.boughtA += amt;
@@ -1372,8 +1837,11 @@ function cancelBillByNumber(billNo, txnType, token) {
     }
   });
 
-  var items = readItemsMap_();
-  Object.keys(itemDelta).forEach(function (key) {
+  // Only the handful of items this one bill touched need to move — not the whole Items sheet.
+  var affectedKeys = Object.keys(itemDelta);
+  var itemsSub = readItemsSubset_(affectedKeys);
+  var items = itemsSub.map;
+  affectedKeys.forEach(function (key) {
     var d = itemDelta[key];
     var rec = items[key];
     if (!rec) return;
@@ -1391,30 +1859,32 @@ function cancelBillByNumber(billNo, txnType, token) {
     if (rec.sold <= 0) { rec.first_sale_date = ''; rec.sale_entries = 0; rec.sale_amount = 0; }
   });
 
-  // Recompute last_purchase_date / last_sale_date for affected keys from the remaining Txn.
+  // Recompute last_purchase_date / last_sale_date for affected keys from the remaining Txn
+  // (already in memory from the read above — no extra sheet call).
   var remainByKey = {};
   found.kept.forEach(function (row) {
     var key = String(row[tc.key]).trim();
+    if (!itemDelta[key]) return;
     var type = String(row[tc.type]).trim().toUpperCase();
     var dIso = row[tc.date];
     var e = remainByKey[key] || (remainByKey[key] = { pur: '', sale: '' });
-    if (type === 'PURCHASE' && dIso > e.pur) e.pur = dIso;
-    if (type === 'SALE' && dIso > e.sale) e.sale = dIso;
+    if ((type === 'PURCHASE' || type === 'STOCK_JOURNAL_IN') && dIso > e.pur) e.pur = dIso;
+    if ((type === 'SALE' || type === 'STOCK_JOURNAL_OUT') && dIso > e.sale) e.sale = dIso;
   });
-  Object.keys(itemDelta).forEach(function (key) {
+  affectedKeys.forEach(function (key) {
     var rec = items[key];
     if (!rec) return;
     var e = remainByKey[key] || { pur: '', sale: '' };
     rec.last_purchase_date = e.pur;
     rec.last_sale_date = e.sale;
   });
-  writeItemsMap_(items);
+  writeItemsSubset_(items, itemsSub.rowOf, affectedKeys);
 
   applySalesmenDelta_(smDelta);
   applyBuysDelta_(buyDelta);
 
-  // Remove the matched rows from Txn.
-  writeGrid_(TABS.TXN, TXN_HEADERS, found.kept);
+  // Remove ONLY the matched rows from Txn (targeted delete, not a full-sheet rewrite).
+  deleteSheetRows_(found.sh, found.matchedRows);
 
   // Archive the matched rows so they can be restored.
   var cancelId = 'canc_' + isoOfDate_(new Date()).replace(/-/g, '') + '_' + Utilities.getUuid().slice(0, 6);
@@ -1431,7 +1901,7 @@ function cancelBillByNumber(billNo, txnType, token) {
 function getCancelledBills(token) {
   var auth = checkAuth_(token, ['admin', 'staff'], 'cancel_bills');
   if (auth._err) return auth._err;
-  setupSheets_();
+  ensureCancelledSheet_();
 
   var rows = readObjects_(TABS.CANCELLED, {
     cancel_id: ['cancel_id'], txn_type: ['txn_type'], date: ['date'], vch_no: ['vch_no'],
@@ -1445,6 +1915,7 @@ function getCancelledBills(token) {
     if (!id) return;
     var g = byId[id] || (byId[id] = {
       cancel_id: id, bill_no: String(o.vch_no || '').trim(), types: {}, items: [],
+      party: String(o.party || '').trim(), salesman: String(o.salesman || '').trim(),
       rows: 0, qty: 0, amount: 0, date_from: '', date_to: '',
       cancelled_by: String(o.cancelled_by || ''), cancelled_at: String(o.cancelled_at || '')
     });
@@ -1462,6 +1933,7 @@ function getCancelledBills(token) {
     var g = byId[id];
     return {
       cancel_id: g.cancel_id, bill_no: g.bill_no, types: Object.keys(g.types), items: g.items,
+      party: g.party, salesman: g.salesman,
       rows: g.rows, qty: g.qty, amount: g.amount, date_from: g.date_from, date_to: g.date_to,
       cancelled_by: g.cancelled_by, cancelled_at: g.cancelled_at
     };
@@ -1486,11 +1958,11 @@ function restoreCancelledBill(cancelId, token) {
              raw: col_(CH, ['item_details_raw']), key: col_(CH, ['item_key']), group: col_(CH, ['group']),
              qty: col_(CH, ['qty']), unit: col_(CH, ['unit']), price: col_(CH, ['price']), amount: col_(CH, ['amount']) };
 
-  var matched = [], keep = [];
+  var matched = [], matchedRows = [];
   for (var i = 1; i < cv.length; i++) {
     if (String(cv[i].join('')).trim() === '') continue;
     cv[i][cc.date] = asIsoMaybe_(cv[i][cc.date]);
-    if (String(cv[i][cc.id]).trim() === id) matched.push(cv[i]); else keep.push(cv[i]);
+    if (String(cv[i][cc.id]).trim() === id) { matched.push(cv[i]); matchedRows.push(i + 1); }
   }
   if (!matched.length) return { ok: false, message: 'That cancelled bill was not found (already restored?).' };
 
@@ -1510,7 +1982,7 @@ function restoreCancelledBill(cancelId, token) {
       dP: 0, dS: 0, dPR: 0, dSR: 0, lastPur: '', lastSale: '', firstPur: '', firstSale: '',
       purPrice: 0, dPurAmt: 0, dSaleAmt: 0, purEntries: 0, saleEntries: 0, suppliers: [], details: itemRaw, group: grp
     });
-    if (type === 'PURCHASE') {
+    if (type === 'PURCHASE' || type === 'STOCK_JOURNAL_IN') {
       d.dP += qty; if (dIso > d.lastPur) d.lastPur = dIso; if (!d.firstPur || dIso < d.firstPur) d.firstPur = dIso;
       if (price) d.purPrice = price;
       d.dPurAmt += amt; d.purEntries++;
@@ -1520,7 +1992,7 @@ function restoreCancelledBill(cancelId, token) {
       var bk = sm + KEY_SEP + key;
       var b = buyDelta[bk] || (buyDelta[bk] = { salesman: sm, item_key: key, qty: 0, amount: 0, last_date: '', details: itemRaw, group: grp });
       b.qty += qty; b.amount += amt; if (dIso > b.last_date) b.last_date = dIso;
-    } else if (type === 'SALE') {
+    } else if (type === 'SALE' || type === 'STOCK_JOURNAL_OUT') {
       d.dS += qty; if (dIso > d.lastSale) d.lastSale = dIso; if (!d.firstSale || dIso < d.firstSale) d.firstSale = dIso;
       d.dSaleAmt += amt; d.saleEntries++;
       var s2 = smDelta[sm] || (smDelta[sm] = { soldQ: 0, soldA: 0, boughtQ: 0, boughtA: 0 });
@@ -1536,8 +2008,11 @@ function restoreCancelledBill(cancelId, token) {
     }
   });
 
-  var items = readItemsMap_();
-  Object.keys(itemDelta).forEach(function (key) {
+  // Only the handful of items this one bill touched need to move — not the whole Items sheet.
+  var affectedKeys = Object.keys(itemDelta);
+  var itemsSub = readItemsSubset_(affectedKeys);
+  var items = itemsSub.map;
+  affectedKeys.forEach(function (key) {
     var d = itemDelta[key];
     var rec = items[key] || (items[key] = newItemRec_(key, d.details, d.group));
     rec.purchased   = round2_(rec.purchased + d.dP);
@@ -1557,7 +2032,7 @@ function restoreCancelledBill(cancelId, token) {
     rec.updated_at = nowStamp_();
     recalcStock_(rec);
   });
-  writeItemsMap_(items);
+  writeItemsSubset_(items, itemsSub.rowOf, affectedKeys);
 
   applySalesmenDelta_(smDelta);
   applyBuysDelta_(buyDelta);
@@ -1572,8 +2047,8 @@ function restoreCancelledBill(cancelId, token) {
   appendRows_(TABS.TXN, txnRows);
   pruneTxn_(readSettings_());
 
-  // Remove the restored rows from CancelledBills.
-  writeGrid_(TABS.CANCELLED, CANCELLED_HEADERS, keep);
+  // Remove ONLY the restored rows from CancelledBills (targeted delete, not a full-sheet rewrite).
+  deleteSheetRows_(sh, matchedRows);
 
   return { ok: true, restored: matched.length, bill_no: String(matched[0][cc.vch] || '').trim() };
 }
@@ -1616,8 +2091,8 @@ function computeDashboard_(windowDays, settings) {
       var sm = String(row[tc.sm]).trim() || '(blank)';
       var w = win[key] || (win[key] = { soldQ: 0, purQ: 0, prQ: 0, srQ: 0, soldAmt: 0, purAmt: 0, moved: false, sellers: {}, buyers: {} });
       w.moved = true;
-      if (type === 'PURCHASE') { w.purQ += qty; w.purAmt += amt; w.buyers[sm] = true; }
-      else if (type === 'SALE') {
+      if (type === 'PURCHASE' || type === 'STOCK_JOURNAL_IN') { w.purQ += qty; w.purAmt += amt; w.buyers[sm] = true; }
+      else if (type === 'SALE' || type === 'STOCK_JOURNAL_OUT') {
         w.soldQ += qty; w.soldAmt += amt; w.sellers[sm] = true;
         var s = smSalesWin[sm] || (smSalesWin[sm] = { qty: 0, amount: 0, items: {} });
         s.qty += qty; s.amount += amt;
@@ -1889,7 +2364,7 @@ function getItemHistory(itemKey, token) {
       if (String(row[tc.key]).trim() !== key) continue;
       var type = String(row[tc.type]).trim().toUpperCase();
       var qty = parseNum_(row[tc.qty]);
-      if (type === 'PURCHASE') purchasedInTxn += qty;
+      if (type === 'PURCHASE' || type === 'STOCK_JOURNAL_IN') purchasedInTxn += qty;
       txns.push({
         type: type, date: asIsoMaybe_(row[tc.date]), vch_no: String(row[tc.vch]).trim(),
         party: String(row[tc.party]).trim(), salesman: String(row[tc.sm]).trim(),
@@ -2390,10 +2865,9 @@ function getAppSettings(token) {
 function saveSettings(patch, token) {
   var auth = checkAuth_(token, ['admin']);
   if (auth._err) return auth._err;
-  setupSheets_();
+  var sh = ensureSettingsSheet_();
 
   var allowed = ['aging_window_days', 'dead_stock_min_qty', 'sell_through_threshold_pct'];
-  var sh = SpreadsheetApp.getActive().getSheetByName(TABS.SETTINGS);
   var vals = sh.getDataRange().getValues();
   var rowOf = {};
   vals.forEach(function (r, idx) { if (r[0] !== '') rowOf[String(r[0]).trim().toLowerCase()] = idx + 1; });

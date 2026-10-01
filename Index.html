@@ -154,7 +154,7 @@
     table.ntable thead th { position:sticky; top:0; z-index:5; }
   }
   table.ntable { width:100%; border-collapse:collapse; font-size:13px; }
-  table.ntable thead th { background:var(--navy-800); color:#fff; padding:9px 8px; font-weight:600; text-align:left; white-space:nowrap; position:relative; }
+  table.ntable thead th { background:var(--navy-800); color:#fff; padding:9px 8px; font-weight:600; text-align:left; white-space:nowrap; }
   table.ntable thead th.sortable { cursor:pointer; }
   table.ntable thead th.num, table.ntable tbody td.num { text-align:right; }
   table.ntable tbody td { padding:8px; border-bottom:1px solid var(--border); }
@@ -385,9 +385,12 @@ function itemDetailHtml(res, L) {
     '<tr>' +
       '<td style="padding:6px 8px">' + fmtDate(t.date) + '</td>' +
       '<td style="padding:6px 8px"><span class="pill ' +
-        (t.type === 'PURCHASE' ? 'SELLING' : t.type === 'SALE' ? 'STALE' : 'UNKNOWN') + '">' +
-        L(t.type.replace('_', ' '), t.type === 'PURCHASE' ? 'Kharid' : t.type === 'SALE' ? 'Bikri' :
-          t.type === 'PURCHASE_RETURN' ? 'Purchase Return' : 'Sale Return') + '</span></td>' +
+        (t.type === 'PURCHASE' || t.type === 'STOCK_JOURNAL_IN' ? 'SELLING' :
+         t.type === 'SALE' || t.type === 'STOCK_JOURNAL_OUT' ? 'STALE' : 'UNKNOWN') + '">' +
+        L(t.type === 'STOCK_JOURNAL_IN' ? 'Stock Journal (In)' : t.type === 'STOCK_JOURNAL_OUT' ? 'Stock Journal (Out)' : t.type.replace('_', ' '),
+          t.type === 'PURCHASE' ? 'Kharid' : t.type === 'SALE' ? 'Bikri' :
+          t.type === 'PURCHASE_RETURN' ? 'Purchase Return' : t.type === 'SALE_RETURN' ? 'Sale Return' :
+          t.type === 'STOCK_JOURNAL_IN' ? 'Stock Journal (In)' : t.type === 'STOCK_JOURNAL_OUT' ? 'Stock Journal (Out)' : t.type) + '</span></td>' +
       '<td style="padding:6px 8px;text-align:right">' + num(t.qty) + '</td>' +
       '<td style="padding:6px 8px;text-align:right">' + inr(t.amount) + '</td>' +
       '<td style="padding:6px 8px">' + (t.party || t.salesman || '—') + (t.vch_no ? ' <span style="color:#93a0b8">#' + t.vch_no + '</span>' : '') + '</td>' +
@@ -1437,6 +1440,12 @@ function CancelledBillsView() {
   const [bills, setBills] = useState(null);
   const [err, setErr] = useState(null);
 
+  // Search results: more than one DIFFERENT bill can share the same number (numbering reset,
+  // different party, a typo) — these are candidates the admin picks from, one at a time.
+  const [candidates, setCandidates] = useState(null);
+  const [searchedBillNo, setSearchedBillNo] = useState('');
+  const [cancellingKey, setCancellingKey] = useState(null);
+
   function load() {
     setErr(null);
     authed('getCancelledBills', [], 60000)
@@ -1449,49 +1458,55 @@ function CancelledBillsView() {
   }
   useEffect(() => { load(); }, []);
 
-  function cancelBill() {
+  function searchBill() {
     const bn = billNo.trim();
     if (!bn) { Swal.fire({ icon: 'info', title: L('Enter a bill number first', 'Pehle bill number daalo') }); return; }
     setBusy(true);
+    setCandidates(null);
     authed('previewBillCancel', [bn, billType], 60000)
       .then(res => {
         setBusy(false);
         if (res && res.authError) return;
         if (!res || !res.ok) { Swal.fire({ icon: 'error', title: L('Not found', 'Nahi Mila'), text: fmtDatesInStr((res && res.message) || '') }); return; }
-        const itemList = res.items.slice(0, 10).map(x => '• ' + x).join('<br>') + (res.items.length > 10 ? '<br>… +' + (res.items.length - 10) + ' more' : '');
-        Swal.fire({
-          icon: 'warning',
-          title: L('Cancel bill "' + res.bill_no + '"?', '"' + res.bill_no + '" bill cancel karein?'),
-          html: '<div style="text-align:left;font-size:13px;line-height:1.7">' +
-            L('Type(s): <b>' + res.types.join(', ') + '</b><br>Rows: <b>' + res.rows + '</b> · Qty: <b>' + num(res.qty) + '</b> · Amount: <b>' + inr(res.amount) + '</b><br>Date range: <b>' + fmtDate(res.date_from) + ' → ' + fmtDate(res.date_to) + '</b><br><br>Items:<br>' + itemList + '<br><br>This reverses these transactions out of stock/salesman totals. You can restore it later from this page.',
-               'Type: <b>' + res.types.join(', ') + '</b><br>Rows: <b>' + res.rows + '</b> · Qty: <b>' + num(res.qty) + '</b> · Amount: <b>' + inr(res.amount) + '</b><br>Date range: <b>' + fmtDate(res.date_from) + ' → ' + fmtDate(res.date_to) + '</b><br><br>Items:<br>' + itemList + '<br><br>Ye transactions stock/salesman totals se hat jayengi. Baad mein isi page se restore kar sakte ho.') +
-            '</div>',
-          showCancelButton: true, confirmButtonText: L('Yes, cancel it', 'Haan, Cancel Karo'), confirmButtonColor: '#c62828',
-          cancelButtonText: L('No', 'Nahi'),
-        }).then(r => {
-          if (!r.isConfirmed) return;
-          setBusy(true);
-          authed('cancelBillByNumber', [bn, billType], 60000)
-            .then(res2 => {
-              setBusy(false);
-              if (res2 && res2.authError) return;
-              if (!res2 || !res2.ok) { Swal.fire({ icon: 'error', title: L('Could not cancel', 'Cancel Nahi Hua'), text: (res2 && res2.message) || '' }); return; }
-              Swal.fire({ icon: 'success', title: L('Bill cancelled', 'Bill Cancel Ho Gaya'), text: res2.rows + ' ' + L('row(s) reversed.', 'row(s) reverse ho gayi.') });
-              setBillNo('');
-              load();
-            })
-            .catch(e => { setBusy(false); Swal.fire({ icon: 'error', title: L('Could not cancel', 'Cancel Nahi Hua'), text: e.message || String(e) }); });
-        });
+        setCandidates(res.groups);
+        setSearchedBillNo(res.bill_no);
       })
       .catch(e => { setBusy(false); Swal.fire({ icon: 'error', title: L('Could not check', 'Check Nahi Ho Paya'), text: e.message || String(e) }); });
+  }
+
+  function cancelGroup(g) {
+    const itemList = g.items.slice(0, 10).map(x => '• ' + x).join('<br>') + (g.items.length > 10 ? '<br>… +' + (g.items.length - 10) + ' more' : '');
+    Swal.fire({
+      icon: 'warning',
+      title: L('Cancel this bill?', 'Ye Bill Cancel Karein?'),
+      html: '<div style="text-align:left;font-size:13px;line-height:1.7">' +
+        L('Bill No.: <b>' + searchedBillNo + '</b><br>Type: <b>' + g.type + '</b><br>Date: <b>' + fmtDate(g.date) + '</b><br>Party/Supplier: <b>' + (g.party || '—') + '</b><br>Salesman: <b>' + (g.salesman || '—') + '</b><br>Rows: <b>' + g.rows + '</b> · Qty: <b>' + num(g.qty) + '</b> · Amount: <b>' + inr(g.amount) + '</b><br><br>Items:<br>' + itemList + '<br><br>This reverses just THIS bill out of stock/salesman totals. You can restore it later from the table below.',
+           'Bill No.: <b>' + searchedBillNo + '</b><br>Type: <b>' + g.type + '</b><br>Date: <b>' + fmtDate(g.date) + '</b><br>Party/Supplier: <b>' + (g.party || '—') + '</b><br>Salesman: <b>' + (g.salesman || '—') + '</b><br>Rows: <b>' + g.rows + '</b> · Qty: <b>' + num(g.qty) + '</b> · Amount: <b>' + inr(g.amount) + '</b><br><br>Items:<br>' + itemList + '<br><br>Sirf YAHI bill stock/salesman totals se reverse hoga. Baad mein neeche table se restore kar sakte ho.') +
+        '</div>',
+      showCancelButton: true, confirmButtonText: L('Yes, cancel it', 'Haan, Cancel Karo'), confirmButtonColor: '#c62828',
+      cancelButtonText: L('No', 'Nahi'),
+    }).then(r => {
+      if (!r.isConfirmed) return;
+      setCancellingKey(g.group_key);
+      authed('cancelBillByNumber', [searchedBillNo, billType, g.group_key], 60000)
+        .then(res2 => {
+          setCancellingKey(null);
+          if (res2 && res2.authError) return;
+          if (!res2 || !res2.ok) { Swal.fire({ icon: 'error', title: L('Could not cancel', 'Cancel Nahi Hua'), text: (res2 && res2.message) || '' }); return; }
+          Swal.fire({ icon: 'success', title: L('Bill cancelled', 'Bill Cancel Ho Gaya'), text: res2.rows + ' ' + L('row(s) reversed.', 'row(s) reverse ho gayi.') });
+          setCandidates(prev => (prev || []).filter(x => x.group_key !== g.group_key));
+          load();
+        })
+        .catch(e => { setCancellingKey(null); Swal.fire({ icon: 'error', title: L('Could not cancel', 'Cancel Nahi Hua'), text: e.message || String(e) }); });
+    });
   }
 
   function restoreBill(b) {
     Swal.fire({
       icon: 'warning', title: L('Restore this bill?', 'Ye Bill Restore Karein?'),
       html: '<div style="text-align:left;font-size:13px;line-height:1.7">' +
-        L('Bill <b>' + b.bill_no + '</b> (' + b.types.join(', ') + ') — ' + b.rows + ' row(s), qty ' + num(b.qty) + ', ' + inr(b.amount) + '.<br>This adds it back into stock/salesman totals.',
-           'Bill <b>' + b.bill_no + '</b> (' + b.types.join(', ') + ') — ' + b.rows + ' row(s), qty ' + num(b.qty) + ', ' + inr(b.amount) + '.<br>Ye wapas stock/salesman totals mein jud jayega.') +
+        L('Bill <b>' + b.bill_no + '</b> (' + b.types.join(', ') + ')<br>Party/Supplier: <b>' + (b.party || '—') + '</b> · Salesman: <b>' + (b.salesman || '—') + '</b><br>' + b.rows + ' row(s), qty ' + num(b.qty) + ', ' + inr(b.amount) + '.<br>This adds it back into stock/salesman totals.',
+           'Bill <b>' + b.bill_no + '</b> (' + b.types.join(', ') + ')<br>Party/Supplier: <b>' + (b.party || '—') + '</b> · Salesman: <b>' + (b.salesman || '—') + '</b><br>' + b.rows + ' row(s), qty ' + num(b.qty) + ', ' + inr(b.amount) + '.<br>Ye wapas stock/salesman totals mein jud jayega.') +
         '</div>',
       showCancelButton: true, confirmButtonText: L('Yes, restore', 'Haan, Restore Karo'), cancelButtonText: L('No', 'Nahi'),
     }).then(r => {
@@ -1511,6 +1526,8 @@ function CancelledBillsView() {
   const columns = [
     { key: 'bill_no', label: L('Bill / Voucher No.', 'Bill / Voucher No.') },
     { key: 'types', label: L('Type(s)', 'Type'), render: r => r.types.join(', '), exportValue: r => r.types.join(', ') },
+    { key: 'party', label: L('Party / Supplier', 'Party / Supplier'), render: r => r.party || '—' },
+    { key: 'salesman', label: L('Salesman', 'Salesman'), render: r => r.salesman || '—' },
     { key: 'rows', label: L('Rows', 'Rows'), align: 'right', sortValue: r => r.rows, render: r => num(r.rows) },
     { key: 'qty', label: L('Qty', 'Qty'), align: 'right', sortValue: r => r.qty, render: r => num(r.qty) },
     { key: 'amount', label: L('Amount', 'Amount'), align: 'right', sortValue: r => r.amount, render: r => inr(r.amount) },
@@ -1539,14 +1556,66 @@ function CancelledBillsView() {
               {BILL_TYPES.map(t => <option key={t.v} value={t.v}>{L(t.en, t.hi)}</option>)}
             </select>
           </div>
-          <button className="btn-primary" disabled={busy} onClick={cancelBill}>
-            {busy ? <><i className="fa-solid fa-spinner fa-spin"></i> {L('Checking…', 'Check Ho Raha Hai…')}</> : <><i className="fa-solid fa-ban"></i> {L('Find & Cancel', 'Dhundo & Cancel Karo')}</>}
+          <button className="btn-primary" disabled={busy} onClick={searchBill}>
+            {busy ? <><i className="fa-solid fa-spinner fa-spin"></i> {L('Searching…', 'Dhundh Raha Hai…')}</> : <><i className="fa-solid fa-magnifying-glass"></i> {L('Find bill(s)', 'Bill Dhundo')}</>}
           </button>
         </div>
         <div className="hint">
-          {L('Only bills whose transactions are still inside the recent detail window (Settings → Transaction detail retention) can be cancelled this way. You will see exactly what will be affected before anything changes.',
-             'Sirf wo bills cancel ho sakte hain jinki transactions abhi bhi haal ke detail window mein hain (Settings → Transaction detail retention). Kuch bhi badalne se pehle exactly kya affect hoga wo dikhaya jayega.')}
+          {L('Only bills whose transactions are still inside the recent detail window (Settings → Transaction detail retention) can be found this way. The same number can belong to more than one real bill (different date/party) — every match will be listed below so you pick the right one.',
+             'Sirf wo bills is tarah dhoondhe ja sakte hain jinki transactions abhi bhi haal ke detail window mein hain (Settings → Transaction detail retention). Ek hi number ke ek se zyada alag bill ho sakte hain (alag date/party) — sab matches neeche list honge, jo chahiye wahi select karo.')}
         </div>
+
+        {candidates && candidates.length === 0 && (
+          <div className="alert" style={{ marginTop: 12 }}>
+            <i className="fa-solid fa-circle-info"></i> {L('No bills found with that number.', 'Is number ka koi bill nahi mila.')}
+          </div>
+        )}
+        {candidates && candidates.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div className="hint" style={{ marginTop: 0, marginBottom: 8, fontWeight: 600 }}>
+              {L(candidates.length + ' bill(s) found for "' + searchedBillNo + '" — pick the one to cancel:',
+                 '"' + searchedBillNo + '" ke liye ' + candidates.length + ' bill mile — jo cancel karna hai wo chuno:')}
+            </div>
+            <div className="tbl-scroll">
+              <table className="ntable">
+                <thead>
+                  <tr>
+                    <th>{L('Date', 'Date')}</th>
+                    <th>{L('Type', 'Type')}</th>
+                    <th>{L('Party / Supplier', 'Party / Supplier')}</th>
+                    <th>{L('Salesman', 'Salesman')}</th>
+                    <th>{L('Items', 'Items')}</th>
+                    <th className="num">{L('Rows', 'Rows')}</th>
+                    <th className="num">{L('Qty', 'Qty')}</th>
+                    <th className="num">{L('Amount', 'Amount')}</th>
+                    <th>{L('Action', 'Action')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {candidates.map(g => (
+                    <tr key={g.group_key}>
+                      <td data-label={L('Date', 'Date')}>{fmtDate(g.date) || '—'}</td>
+                      <td data-label={L('Type', 'Type')}>{g.type}</td>
+                      <td data-label={L('Party / Supplier', 'Party / Supplier')}>{g.party || '—'}</td>
+                      <td data-label={L('Salesman', 'Salesman')}>{g.salesman || '—'}</td>
+                      <td data-label={L('Items', 'Items')}>{g.items.slice(0, 2).join(', ') + (g.items.length > 2 ? ' +' + (g.items.length - 2) + ' more' : '')}</td>
+                      <td data-label={L('Rows', 'Rows')} className="num">{num(g.rows)}</td>
+                      <td data-label={L('Qty', 'Qty')} className="num">{num(g.qty)}</td>
+                      <td data-label={L('Amount', 'Amount')} className="num">{inr(g.amount)}</td>
+                      <td data-label={L('Action', 'Action')}>
+                        <button type="button" className="btn-danger-sm" disabled={cancellingKey === g.group_key} onClick={() => cancelGroup(g)}>
+                          {cancellingKey === g.group_key
+                            ? <><i className="fa-solid fa-spinner fa-spin"></i> {L('Cancelling…', 'Cancel Ho Raha Hai…')}</>
+                            : <><i className="fa-solid fa-ban"></i> {L('Cancel this bill', 'Ye Bill Cancel Karo')}</>}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="panel">
@@ -1589,7 +1658,7 @@ function UnmatchedView({ rows }) {
 
 /* ================= Import Data ================= */
 
-const IMPORT_TYPES = ['Purchase', 'Sales', 'Purchase Return', 'Sales Return', 'Stock'];
+const IMPORT_TYPES = ['Purchase', 'Sales', 'Purchase Return', 'Sales Return', 'Stock Journal', 'Stock'];
 
 function ImportData({ onImported, onAuthError, isAdmin }) {
   const { L, lang } = useLang();
@@ -1678,6 +1747,16 @@ function ImportData({ onImported, onAuthError, isAdmin }) {
             (res.isStock
               ? L('Items in table now', 'Table mein ab items') + ': <b>' + res.rowsWritten + '</b><br>' +
                 (res.note ? '<span style="color:var(--muted)">' + fmtDatesInStr(res.note) + '</span><br>' : '')
+              : res.isStockJournal
+              ? '<b style="color:#2e7d32">' + L('Generated — added like a Purchase', 'Generated — Purchase jaisa juda') + '</b>: ' +
+                  num(res.generated.qty) + ' ' + L('qty', 'qty') + ' (' + res.generated.rows + ' ' + L('rows', 'rows') + '), ' + inr(res.generated.amount) + '<br>' +
+                '<b style="color:#b26a00">' + L('Consumed — removed like a Sale', 'Consumed — Sale jaisa hata') + '</b>: ' +
+                  num(res.consumed.qty) + ' ' + L('qty', 'qty') + ' (' + res.consumed.rows + ' ' + L('rows', 'rows') + '), ' + inr(res.consumed.amount) + '<br>' +
+                L('Blank dates filled', 'Khaali dates bhari gayi') + ': <b>' + res.blankDatesFilled + '</b><br>' +
+                L('Date format detected', 'Date format pehchana gaya') + ': <b>' + res.dateFormat + '</b><br>' +
+                (res.skippedBeforeOpening ? '<b style="color:#b26a00">' + L('Skipped (before opening date)', 'Skip hui (opening date se pehle)') + ': ' + res.skippedBeforeOpening + '</b><br>' : '') +
+                L('Ledger rows added', 'Ledger mein rows judi') + ': <b>' + res.rowsAdded + '</b><br>' +
+                L('Old rows pruned (past retention)', 'Purani rows hati (retention se bahar)') + ': <b>' + res.rowsRemoved + '</b><br>'
               : L('Blank dates filled', 'Khaali dates bhari gayi') + ': <b>' + res.blankDatesFilled + '</b><br>' +
                 L('Date format detected', 'Date format pehchana gaya') + ': <b>' + res.dateFormat + '</b><br>' +
                 L('Date range kept', 'Date range rakha gaya') + ': <b>' + fmtDatesInStr(res.dateRange) + '</b><br>' +
@@ -1747,6 +1826,7 @@ function ImportData({ onImported, onAuthError, isAdmin }) {
             <br /><b>Safety:</b> jo span ek baar import ho chuka (same type, overlapping dates), wo dobara reject ho jayega — double counting nahi hogi.
             Galat file paste ho gayi to neeche <b>Undo last import</b> use karo.
             Dates <i>From … to …</i> line se apne aap detect hoti hain (Sales Return = MM-DD, baaki DD-MM). Pura mahina bhi chalega; sirf bahut zyada bada ho to Busy se chhota date-range nikaalo.
+            <br /><b>Stock Journal:</b> jab ek item ko dusre mein convert karte ho (rework/conversion voucher, koi party/salesman nahi) — Generated side Purchase jaisa jud jata hai, Consumed side Sale jaisa minus ho jata hai.
           </>
         ) : (
           <>
@@ -1757,6 +1837,7 @@ function ImportData({ onImported, onAuthError, isAdmin }) {
             <br /><b>Safety:</b> a span you already imported (same type, overlapping dates) is rejected — no double counting.
             Use <b>Undo last import</b> below if you pasted the wrong file.
             Dates auto-detected from the <i>From … to …</i> line (Sales Return defaults to MM-DD, the rest DD-MM). A full month is fine; only if it's truly huge, export a shorter date range from Busy.
+            <br /><b>Stock Journal:</b> use this when converting one item into another (a rework/conversion voucher, no party/salesman) — the Generated side is added like a Purchase, the Consumed side subtracted like a Sale.
           </>
         )}
       </div>
