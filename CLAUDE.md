@@ -33,6 +33,15 @@ Web app deployment must be **Execute as: me (owner)**, **Access: anyone in the o
 - **"Switch Firm" (admin-only, topbar)** is a bookmark list, not a data switch — `Settings!firm_links_json` ({name,url} pairs the admin pastes in Settings → "Switch Firm"), surfaced via `getAppSettings`. Clicking an entry opens that firm's **separate** deployed URL in a new tab; the admin logs in there with that firm's own, separate `Users` tab. There is no way to show two firms' data in one page load — each deployed `/exec` URL is its own independent app.
 - Rolling out a code change (bug fix, new feature) to multiple firms is **manual**: re-paste the updated `Code.gs`/`Index.html` into each firm's Apps Script editor and deploy a new version there. There's no shared library / central deploy across Sheets in this setup.
 
+**Rollout checklist (do this once per firm, every time `Code.gs`/`Index.html` change):**
+1. Confirm the change is finished here (GitHub `main` has it, `CLAUDE.md` updated if it touched architecture).
+2. Open that firm's Sheet → Extensions → Apps Script.
+3. Replace the whole `Code.gs` content, replace the whole `Index.html` content. Save.
+4. `createDefaultUsers()` / `menuSetupSheets` are **not** needed again — self-healing (`ensureSettingsSheet_`, `migrateUsersPermissionsColumn_`, etc.) seeds any new tab/column/Settings key automatically on next use.
+5. Quick smoke test on that firm's `/dev` URL: log in, open Dashboard, open whatever the change touched.
+6. Deploy → Manage deployments → Edit → **New version** (the `/exec` URL staff use only updates here).
+7. Repeat 2–6 for every other firm's Sheet.
+
 ## Architecture — LEAN / INCREMENTAL (v3)
 
 The database is **7 small tabs that never grow unbounded** (plus `Settings`, `Users`). No raw paste tabs, no all-time transaction ledger, no materialised report tabs.
