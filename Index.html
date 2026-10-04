@@ -2128,17 +2128,20 @@ function UsersView() {
 
 /* ================= Settings (admin only) ================= */
 
-function SettingsView({ onAuthError }) {
+function SettingsView({ onAuthError, onFirmLinksSaved }) {
   const { L } = useLang();
   const [s, setS] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [links, setLinks] = useState([]);
+  const [linksBusy, setLinksBusy] = useState(false);
 
   useEffect(() => {
     authed('getAppSettings', [], 60000)
       .then(r => {
         if (r && r.authError) { onAuthError && onAuthError(); return; }
-        if (r && r.ok) setS(r); else setErr((r && r.message) || 'Could not load settings.');
+        if (r && r.ok) { setS(r); setLinks((r.firm_links || []).map(f => ({ name: f.name, url: f.url }))); }
+        else setErr((r && r.message) || 'Could not load settings.');
       })
       .catch(e => setErr(e.message || String(e)));
   }, []);
@@ -2151,6 +2154,7 @@ function SettingsView({ onAuthError }) {
   function save() {
     setBusy(true);
     authed('saveSettings', [{
+      company_name: s.company_name,
       aging_window_days: s.aging_window_days,
       dead_stock_min_qty: s.dead_stock_min_qty,
       sell_through_threshold_pct: s.sell_through_threshold_pct,
@@ -2162,6 +2166,27 @@ function SettingsView({ onAuthError }) {
         else Swal.fire({ icon: 'error', title: L('Save failed', 'Save Nahi Hua'), text: (r && r.message) || '' });
       })
       .catch(e => { setBusy(false); Swal.fire({ icon: 'error', title: L('Save failed', 'Save Nahi Hua'), text: e.message || String(e) }); });
+  }
+
+  function setLink(i, k, v) { setLinks(ls => ls.map((l, idx) => idx === i ? { ...l, [k]: v } : l)); }
+  function addLinkRow() { setLinks(ls => [...ls, { name: '', url: '' }]); }
+  function removeLinkRow(i) { setLinks(ls => ls.filter((_, idx) => idx !== i)); }
+
+  function saveLinks() {
+    const cleaned = links.map(l => ({ name: l.name.trim(), url: l.url.trim() })).filter(l => l.name && l.url);
+    const bad = cleaned.find(l => !/^https:\/\//i.test(l.url));
+    if (bad) { Swal.fire({ icon: 'error', title: L('Bad link', 'Galat Link'), text: L('"' + bad.url + '" must start with https://', '"' + bad.url + '" https:// se shuru hona chahiye') }); return; }
+    setLinksBusy(true);
+    authed('saveSettings', [{ firm_links: cleaned }], 60000)
+      .then(r => {
+        setLinksBusy(false);
+        if (r && r.authError) { onAuthError && onAuthError(); return; }
+        if (!r || !r.ok) { Swal.fire({ icon: 'error', title: L('Save failed', 'Save Nahi Hua'), text: (r && r.message) || '' }); return; }
+        setLinks(cleaned);
+        onFirmLinksSaved && onFirmLinksSaved(cleaned);
+        Swal.fire({ icon: 'success', title: L('Saved', 'Save Ho Gaya') });
+      })
+      .catch(e => { setLinksBusy(false); Swal.fire({ icon: 'error', title: L('Save failed', 'Save Nahi Hua'), text: e.message || String(e) }); });
   }
 
   function resetAll() {
@@ -2193,6 +2218,11 @@ function SettingsView({ onAuthError }) {
       <h2>{L('Settings', 'Settings')} <small>· {L('thresholds that drive the DEAD / STALE / SLOW status', 'DEAD / STALE / SLOW status ke thresholds')}</small></h2>
       <div className="form-grid">
         <div>
+          <label>{L('Company name', 'Company Naam')}</label>
+          <input type="text" value={s.company_name || ''} onChange={e => set('company_name', e.target.value)} placeholder="Paris Fashion" />
+          <div className="fhint">{L('Shown on the login page, sidebar, browser tab and footer.', 'Login page, sidebar, browser tab aur footer pe yahi naam dikhega.')}</div>
+        </div>
+        <div>
           <label>{L('Aging window (days)', 'Aging Window (Din)')}</label>
           <input type="number" value={s.aging_window_days} onChange={e => set('aging_window_days', e.target.value)} />
           <div className="fhint">{L('Days since last purchase before an item can be flagged DEAD.', 'Kharid ke kitne din baad item DEAD flag ho sakta hai.')}</div>
@@ -2222,6 +2252,33 @@ function SettingsView({ onAuthError }) {
       </div>
     </div>
 
+    <div className="panel">
+      <h2>{L('Switch Firm — other firms\' links', 'Switch Firm — Doosri Firms Ke Links')} <small>· {L('each firm is a separate Sheet + separate deployed app', 'har firm apni alag Sheet + alag deployed app hai')}</small></h2>
+      <div className="hint" style={{ marginTop: 0 }}>
+        {L('This does NOT share data between firms — it is just a bookmark list. Paste the deployed web-app URL (the /exec link) of each other firm\'s copy of this system; clicking one in the "Switch firm" button (top bar) opens it in a new tab, where you log in separately with that firm\'s own account.',
+           'Ye firms ke beech data share NAHI karta — bas ek bookmark list hai. Har doosri firm ke is system ke copy ka deployed web-app URL (/exec link) yahan paste karo; top bar ke "Switch firm" button se click karne par wo naye tab mein khulega, jahan us firm ke apne account se alag se login karna hoga.')}
+      </div>
+      {links.map((l, i) => (
+        <div key={i} className="days-row" style={{ marginTop: 10 }}>
+          <input type="text" value={l.name} onChange={e => setLink(i, 'name', e.target.value)}
+            placeholder={L('Firm name, e.g. ABC Textiles', 'Firm naam, jaise ABC Textiles')} style={{ flex: '1 1 160px' }} />
+          <input type="text" value={l.url} onChange={e => setLink(i, 'url', e.target.value)}
+            placeholder="https://script.google.com/macros/s/.../exec" style={{ flex: '2 1 260px' }} />
+          <button type="button" className="btn-danger-sm" onClick={() => removeLinkRow(i)}>
+            <i className="fa-solid fa-trash"></i> {L('Remove', 'Hatao')}
+          </button>
+        </div>
+      ))}
+      <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <button type="button" className="btn-sm" onClick={addLinkRow}>
+          <i className="fa-solid fa-plus"></i> {L('Add a firm', 'Firm Add Karo')}
+        </button>
+        <button type="button" className="btn-primary" onClick={saveLinks} disabled={linksBusy}>
+          {linksBusy ? <><i className="fa-solid fa-spinner fa-spin"></i> {L('Saving…', 'Save Ho Raha Hai…')}</> : <><i className="fa-solid fa-floppy-disk"></i> {L('Save links', 'Links Save Karo')}</>}
+        </button>
+      </div>
+    </div>
+
     <div className="panel" style={{ borderLeft: '4px solid var(--dead)' }}>
       <h2 style={{ color: 'var(--dead)' }}><i className="fa-solid fa-triangle-exclamation"></i> {L('Danger zone', 'Khatarnak Zone')}</h2>
       <div className="hint" style={{ marginBottom: 12 }}>
@@ -2238,7 +2295,7 @@ function SettingsView({ onAuthError }) {
 
 /* ================= Login ================= */
 
-function Login({ onLogin }) {
+function Login({ onLogin, companyName }) {
   const { L } = useLang();
   const [u, setU] = useState('');
   const [p, setP] = useState('');
@@ -2265,7 +2322,7 @@ function Login({ onLogin }) {
       <form className="login-card" onSubmit={submit}>
         <LangToggle />
         <div className="logo"><i className="fa-solid fa-shirt"></i></div>
-        <h1>Paris Fashion</h1>
+        <h1>{companyName || 'Paris Fashion'}</h1>
         <p className="tag">{L('Dead-Stock Tracker — sign in', 'Dead-Stock Tracker — login karo')}</p>
         <label>{L('Username', 'Username')}</label>
         <input value={u} onChange={e => setU(e.target.value)} autoFocus autoComplete="username" />
@@ -2281,7 +2338,7 @@ function Login({ onLogin }) {
 
 /* ================= Shell (sidebar + topbar + views) ================= */
 
-function Shell({ auth, onLogout }) {
+function Shell({ auth, onLogout, companyName }) {
   const { L } = useLang();
   const navItems = useMemo(() => NAV.filter(n =>
     n.roles.indexOf(auth.role) > -1 &&
@@ -2294,6 +2351,39 @@ function Shell({ auth, onLogout }) {
   const [err, setErr] = useState(null);
   const [windowDays, setWindowDays] = useState(16);
   const [reportFilter, setReportFilter] = useState(null);
+  const [firmLinks, setFirmLinks] = useState([]);
+
+  // Admin-only "switch to another firm" list — each firm is its own separate Sheet + its own
+  // deployed web app, so this is a bookmark menu (opens that firm's URL in a new tab, where the
+  // admin logs in separately), never an in-place data switch. Fetched once; Settings view is the
+  // only place that edits it, so a re-fetch on every Settings save isn't needed here.
+  useEffect(() => {
+    if (auth.role !== 'admin') return;
+    authed('getAppSettings', [], 60000).then(r => { if (r && r.ok) setFirmLinks(r.firm_links || []); }).catch(() => {});
+  }, []);
+
+  function switchFirm() {
+    if (!firmLinks.length) {
+      Swal.fire({
+        icon: 'info', title: L('No other firms added yet', 'Abhi koi aur firm nahi judi'),
+        text: L('Add a firm\'s link from Settings → Switch Firm first.', 'Pehle Settings → Switch Firm se kisi firm ka link add karo.'),
+      });
+      return;
+    }
+    const itemsHtml = firmLinks.map(f =>
+      '<a href="' + f.url + '" target="_blank" rel="noopener" class="btn-sm" style="display:flex;align-items:center;gap:8px;margin-bottom:8px;text-decoration:none">' +
+        '<i class="fa-solid fa-arrow-up-right-from-square"></i> ' + f.name +
+      '</a>'
+    ).join('');
+    Swal.fire({
+      title: L('Switch firm', 'Firm Switch Karo'),
+      html: '<div style="text-align:left">' + itemsHtml +
+        '<div class="hint" style="margin-top:10px">' +
+        L('Opens that firm\'s app in a new tab — it has its own separate login.', 'Us firm ka app naye tab mein khulega — uska apna alag login hai.') +
+        '</div></div>',
+      showConfirmButton: false, showCloseButton: true,
+    });
+  }
 
   // if a view isn't allowed for this role, snap back to Dashboard
   useEffect(() => { if (navItems.findIndex(n => n.id === view) < 0) setView('dashboard'); }, [view, navItems]);
@@ -2343,7 +2433,7 @@ function Shell({ auth, onLogout }) {
   return (
     <div className="shell">
       <aside className={'sidebar' + (sidebarOpen ? ' open' : '')}>
-        <div className="brand"><span className="logo"><i className="fa-solid fa-shirt"></i></span> Paris Fashion IMS</div>
+        <div className="brand"><span className="logo"><i className="fa-solid fa-shirt"></i></span> {(companyName || 'Paris Fashion') + ' IMS'}</div>
         <nav>
           {navItems.map(n => (
             <button key={n.id} className={view === n.id ? 'active' : ''} onClick={() => go(n.id)}>
@@ -2371,6 +2461,11 @@ function Shell({ auth, onLogout }) {
           {needsData && (
             <button className="icon-btn" onClick={() => load(windowDays)} title="Reload"><i className="fa-solid fa-rotate"></i></button>
           )}
+          {auth.role === 'admin' && (
+            <button className="icon-btn" onClick={switchFirm} title={L('Switch firm', 'Firm Switch Karo')}>
+              <i className="fa-solid fa-building"></i>
+            </button>
+          )}
           <div className="userchip">
             <span>{auth.display_name}</span>
             <span className="role">{auth.role}</span>
@@ -2394,7 +2489,7 @@ function Shell({ auth, onLogout }) {
 
           {view === 'settings' && (
             <ErrorBoundary label="Settings">
-              <SettingsView onAuthError={onLogout} />
+              <SettingsView onAuthError={onLogout} onFirmLinksSaved={setFirmLinks} />
             </ErrorBoundary>
           )}
 
@@ -2432,8 +2527,8 @@ function Shell({ auth, onLogout }) {
           )}
         </div>
 
-        <footer>{L('Paris Fashion IMS · dead-stock & salesperson accountability · thresholds in Settings',
-                    'Paris Fashion IMS · dead-stock aur salesman accountability · thresholds Settings mein')}</footer>
+        <footer>{(companyName || 'Paris Fashion') + ' IMS'} · {L('dead-stock & salesperson accountability · thresholds in Settings',
+                    'dead-stock aur salesman accountability · thresholds Settings mein')}</footer>
       </div>
     </div>
   );
@@ -2443,6 +2538,12 @@ function Shell({ auth, onLogout }) {
 
 function App() {
   const [auth, setAuth] = useState(_initAuth);
+  const [companyName, setCompanyName] = useState('');
+
+  // Public (no token needed) — so the login page shows the right name even before signing in.
+  useEffect(() => {
+    callServer('getPublicBranding', []).then(r => { if (r && r.ok) setCompanyName(r.company_name); }).catch(() => {});
+  }, []);
 
   function onLogin(a) { writeAuth(a); setAuth(a); }
   function onLogout() {
@@ -2451,8 +2552,8 @@ function App() {
     if (t) callServer('logout', [t], 20000).catch(() => {});
   }
 
-  if (!auth || !auth.token) return <Login onLogin={onLogin} />;
-  return <Shell auth={auth} onLogout={onLogout} />;
+  if (!auth || !auth.token) return <Login onLogin={onLogin} companyName={companyName} />;
+  return <Shell auth={auth} onLogout={onLogout} companyName={companyName} />;
 }
 
 try {

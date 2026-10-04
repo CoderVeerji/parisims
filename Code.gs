@@ -113,8 +113,14 @@ var SETTINGS_DEFAULTS = {
   date_format_raw_sales:         'AUTO',
   date_format_raw_purchasereturn:'AUTO',
   date_format_raw_salesreturn:   'AUTO',
-  date_format_raw_stockjournal:  'AUTO'
+  date_format_raw_stockjournal:  'AUTO',
+  company_name:                  'Paris Fashion',   // shown in the page title / login / sidebar / footer
+  firm_links_json:               '[]'               // JSON [{name,url}] — admin's "switch to another firm" list
 };
+
+// readSettings_ upper-cases every non-numeric setting by default (right for AUTO/DD-MM/MM-DD) —
+// these two carry real text (a display name, a JSON blob) and must NOT be mangled that way.
+var SETTINGS_KEEP_CASE = { company_name: true, firm_links_json: true };
 
 var KEY_SEP        = ' || ';
 var MAX_PASTE_ROWS = 80000;      // hard ceiling for one paste (a full month of a wholesaler's sales)
@@ -134,10 +140,12 @@ function onOpen() {
     .addToUi();
 }
 
-/** Serves the dashboard. */
+/** Serves the dashboard. Browser-tab title uses this Sheet's own company_name (Settings), so a
+    copy of this project deployed for a different firm shows that firm's name with zero code edits. */
 function doGet() {
+  var companyName = readSettings_().company_name || 'Paris Fashion';
   return HtmlService.createHtmlOutputFromFile('Index')
-    .setTitle('Paris Fashion — Dead Stock Tracker')
+    .setTitle(companyName + ' — Dead Stock Tracker')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
@@ -372,7 +380,7 @@ function readSettings_() {
         var n = parseNum_(r[1]);
         if (n) out[key] = n;
       } else if (String(r[1]).trim() !== '') {
-        out[key] = String(r[1]).trim().toUpperCase();   // AUTO / DD-MM / MM-DD
+        out[key] = SETTINGS_KEEP_CASE[key] ? String(r[1]).trim() : String(r[1]).trim().toUpperCase();   // AUTO / DD-MM / MM-DD
       }
     });
   }
@@ -2571,6 +2579,12 @@ function createDefaultUsers() {
   return msg.join('\n');
 }
 
+/** Public, unauthenticated — the login page needs the company name before anyone has a token.
+    Reveals nothing beyond the display name (not a secret; already visible on the Sheet itself). */
+function getPublicBranding() {
+  return { ok: true, company_name: readSettings_().company_name || 'Paris Fashion' };
+}
+
 function login(username, password) {
   try {
     var sh = SpreadsheetApp.getActive().getSheetByName(TABS.USERS);
@@ -2852,33 +2866,58 @@ function getAppSettings(token) {
   var auth = checkAuth_(token, ['admin']);
   if (auth._err) return auth._err;
   var s = readSettings_();
+  var firmLinks = [];
+  try { firmLinks = JSON.parse(s.firm_links_json || '[]'); } catch (e) { firmLinks = []; }
   return {
     ok: true,
+    company_name: s.company_name,
     aging_window_days: s.aging_window_days,
     dead_stock_min_qty: s.dead_stock_min_qty,
     sell_through_threshold_pct: s.sell_through_threshold_pct,
     txn_retention_days: s.txn_retention_days,
-    opening_stock_as_of: getOpeningAsOf_()
+    opening_stock_as_of: getOpeningAsOf_(),
+    firm_links: firmLinks
   };
 }
 
+/**
+ * `patch` may carry: the three numeric thresholds, `company_name` (plain string), and/or
+ * `firm_links` (array of {name,url} — admin's "switch to another firm" list, stored as JSON;
+ * only http(s) URLs are kept, anything else is silently dropped rather than stored and later
+ * rendered as a clickable link).
+ */
 function saveSettings(patch, token) {
   var auth = checkAuth_(token, ['admin']);
   if (auth._err) return auth._err;
   var sh = ensureSettingsSheet_();
 
-  var allowed = ['aging_window_days', 'dead_stock_min_qty', 'sell_through_threshold_pct'];
+  var numericKeys = ['aging_window_days', 'dead_stock_min_qty', 'sell_through_threshold_pct'];
+  var stringKeys = ['company_name'];
   var vals = sh.getDataRange().getValues();
   var rowOf = {};
   vals.forEach(function (r, idx) { if (r[0] !== '') rowOf[String(r[0]).trim().toLowerCase()] = idx + 1; });
 
-  allowed.forEach(function (k) {
-    if (!patch || patch[k] == null || patch[k] === '') return;
-    var n = parseNum_(patch[k]);
-    if (rowOf[k]) sh.getRange(rowOf[k], 2).setValue(n);
-    else sh.appendRow([k, n]);
-  });
+  function setKey(key, value) {
+    if (rowOf[key]) { sh.getRange(rowOf[key], 2).setValue(value); }
+    else { sh.appendRow([key, value]); rowOf[key] = sh.getLastRow(); }
+  }
 
-  // Thresholds take effect on the next dashboard load (computed live). No rebuild needed.
+  numericKeys.forEach(function (k) {
+    if (!patch || patch[k] == null || patch[k] === '') return;
+    setKey(k, parseNum_(patch[k]));
+  });
+  stringKeys.forEach(function (k) {
+    if (!patch || patch[k] == null) return;
+    var v = String(patch[k]).trim();
+    if (v) setKey(k, v);
+  });
+  if (patch && Array.isArray(patch.firm_links)) {
+    var links = patch.firm_links
+      .map(function (l) { return { name: String((l && l.name) || '').trim(), url: String((l && l.url) || '').trim() }; })
+      .filter(function (l) { return l.name && /^https:\/\//i.test(l.url); });
+    setKey('firm_links_json', JSON.stringify(links));
+  }
+
+  // Thresholds / branding take effect on the next load (computed live). No rebuild needed.
   return { ok: true };
 }
