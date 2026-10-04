@@ -2151,10 +2151,15 @@ function SettingsView({ onAuthError, onFirmLinksSaved }) {
 
   function set(k, v) { setS(p => ({ ...p, [k]: v })); }
 
+  // Live preview: repaint immediately on click, save() persists it (or a Cancel-without-saving
+  // leaves the preview showing until the next full reload — acceptable, matches "Save" elsewhere).
+  function pickTheme(code) { set('theme', code); applyTheme(code); }
+
   function save() {
     setBusy(true);
     authed('saveSettings', [{
       company_name: s.company_name,
+      theme: s.theme,
       aging_window_days: s.aging_window_days,
       dead_stock_min_qty: s.dead_stock_min_qty,
       sell_through_threshold_pct: s.sell_through_threshold_pct,
@@ -2238,6 +2243,36 @@ function SettingsView({ onAuthError, onFirmLinksSaved }) {
           <div className="fhint">{L('Below this sell-through %, an item is DEAD / SLOW.', 'Is % se kam sell-through ho to item DEAD / SLOW hai.')}</div>
         </div>
       </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, display: 'block', marginBottom: 8 }}>
+          {L('Theme colour', 'Theme Rang')}
+        </label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {Object.keys(THEMES).map(code => {
+            const t = THEMES[code];
+            const active = (s.theme || DEFAULT_THEME) === code;
+            return (
+              <button type="button" key={code} onClick={() => pickTheme(code)} title={t.label}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px 6px 6px',
+                  borderRadius: 999, cursor: 'pointer',
+                  border: active ? '2px solid ' + t.accent : '1px solid var(--border)',
+                  background: active ? t[900] : '#fff', color: active ? '#fff' : 'var(--text)',
+                  fontSize: 12.5, fontWeight: 600,
+                }}>
+                <span style={{ width: 18, height: 18, borderRadius: '50%', background: t.accent, flexShrink: 0, border: '1px solid rgba(0,0,0,.1)' }}></span>
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="fhint" style={{ marginTop: 6 }}>
+          {L('Changes the sidebar/header/button colours for this firm only — status colours (DEAD/SLOW/SELLING etc.) never change. Click a swatch to preview, then Save.',
+             'Sirf is firm ke sidebar/header/button ka rang badlega — status colours (DEAD/SLOW/SELLING waghera) kabhi nahi badalte. Swatch click karke preview karo, phir Save karo.')}
+        </div>
+      </div>
+
       <button className="btn-primary" onClick={save} disabled={busy}>
         {busy ? <><i className="fa-solid fa-spinner fa-spin"></i> {L('Saving…', 'Save Ho Raha Hai…')}</> : <><i className="fa-solid fa-floppy-disk"></i> {L('Save', 'Save Karo')}</>}
       </button>
@@ -2534,15 +2569,45 @@ function Shell({ auth, onLogout, companyName }) {
   );
 }
 
+/* ================= theme (per-firm colour preset — chrome only, never the status colours) ================= */
+
+// Keys must match Code.gs's THEME_CODES exactly. Only the "chrome" (sidebar, buttons, headers,
+// active-nav highlight) recolors — DEAD/STALE/SLOW/SELLING etc. stay fixed red/orange/green
+// everywhere, on purpose, so their meaning never depends on which firm you're looking at.
+const THEMES = {
+  navy:     { label: 'Navy (default)', 900: '#0b1e3f', 800: '#12294f', 700: '#1b3a6b', 600: '#2a4d86', 500: '#3a63a8', accent: '#4f8cff' },
+  maroon:   { label: 'Maroon',         900: '#3a0d14', 800: '#4d121b', 700: '#6b1a26', 600: '#862234', 500: '#a32d41', accent: '#e0506b' },
+  forest:   { label: 'Forest',         900: '#0b2e1a', 800: '#123d22', 700: '#1b522f', 600: '#216b3b', 500: '#2d8a4d', accent: '#4caf6b' },
+  purple:   { label: 'Purple',         900: '#230b3f', 800: '#30124f', 700: '#431b6b', 600: '#572486', 500: '#6c30a8', accent: '#9a5bf0' },
+  teal:     { label: 'Teal',           900: '#063138', 800: '#0a4047', 700: '#0f5962', 600: '#14737d', 500: '#1a919c', accent: '#2fc2cc' },
+  charcoal: { label: 'Charcoal',       900: '#1a1c20', 800: '#24272c', 700: '#33373e', 600: '#454a52', 500: '#5a606a', accent: '#7b8491' },
+  amber:    { label: 'Amber',          900: '#3d2a06', 800: '#4f380a', 700: '#6b4d12', 600: '#866319', 500: '#a37c23', accent: '#e0a93a' },
+};
+const DEFAULT_THEME = 'navy';
+
+/** Repaint the UI chrome by overriding the --navy-900..500 / --accent CSS custom properties on
+    <html> — no rebuild/redeploy needed, takes effect the instant it's called (also used for a live
+    preview in Settings before saving). */
+function applyTheme(code) {
+  const t = THEMES[String(code || '').toLowerCase()] || THEMES[DEFAULT_THEME];
+  const root = document.documentElement.style;
+  root.setProperty('--navy-900', t[900]);
+  root.setProperty('--navy-800', t[800]);
+  root.setProperty('--navy-700', t[700]);
+  root.setProperty('--navy-600', t[600]);
+  root.setProperty('--navy-500', t[500]);
+  root.setProperty('--accent', t.accent);
+}
+
 /* ================= App (auth gate) ================= */
 
 function App() {
   const [auth, setAuth] = useState(_initAuth);
   const [companyName, setCompanyName] = useState('');
 
-  // Public (no token needed) — so the login page shows the right name even before signing in.
+  // Public (no token needed) — so the login page shows the right name/colours even before signing in.
   useEffect(() => {
-    callServer('getPublicBranding', []).then(r => { if (r && r.ok) setCompanyName(r.company_name); }).catch(() => {});
+    callServer('getPublicBranding', []).then(r => { if (r && r.ok) { setCompanyName(r.company_name); applyTheme(r.theme); } }).catch(() => {});
   }, []);
 
   function onLogin(a) { writeAuth(a); setAuth(a); }
